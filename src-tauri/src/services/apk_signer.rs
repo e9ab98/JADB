@@ -430,12 +430,38 @@ pub fn format_apk_signed_path(apk: &str) -> String {
 }
 
 pub fn find_signed_apk(apk: &str) -> Option<String> {
-    let predicted = format_apk_signed_path(apk);
-    if Path::new(&predicted).exists() {
-        return Some(predicted);
-    }
     let path = Path::new(apk);
     let parent = path.parent()?;
+
+    // Build the predicted path via PathBuf::join so the result uses
+    // the host's separator (Windows \\ or Unix /). Comparing it via
+    // `to_string_lossy()` matches what `PathBuf::join(...)` produced
+    // for the same file on the other side of the test assertion.
+    //
+    // The previous version rebuilt the path with hard-coded "/"`s
+    // which produced a mixed-separator string on Windows that did not
+    // equal the PathBuf::to_str() output the test compared against.
+    let predicted_path = {
+        let stem = path
+            .file_stem()
+            .and_then(|value| value.to_str())
+            .unwrap_or("output");
+        let extension = path
+            .extension()
+            .and_then(|value| value.to_str())
+            .unwrap_or("apk");
+        let parent_path = if parent.as_os_str().is_empty() {
+            Path::new(".")
+        } else {
+            parent
+        };
+        parent_path.join(format!("{stem}-aligned-signed.{extension}"))
+    };
+
+    if predicted_path.exists() {
+        return Some(predicted_path.to_string_lossy().into_owned());
+    }
+
     let input_mtime = std::fs::metadata(apk).ok()?.modified().ok()?;
     let mut best: Option<(std::time::SystemTime, PathBuf)> = None;
     for entry in std::fs::read_dir(parent).ok()?.flatten() {
@@ -458,7 +484,13 @@ pub fn find_signed_apk(apk: &str) -> Option<String> {
             Some(modified) => modified,
             None => continue,
         };
-        if modified <= input_mtime {
+        // Skip only strictly older files. `<=` would exclude files
+        // whose mtime is byte-identical to the input's, which happens
+        // on NTFS through CI VMs where two back-to-back writes land
+        // on the same 100ns mtime tick. The fallback below is then
+        // empty and we return None even though the signed file is
+        // right there.
+        if modified < input_mtime {
             continue;
         }
         if best
