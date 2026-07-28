@@ -406,7 +406,7 @@ fn strip_pax_global_headers(bytes: &[u8]) -> Vec<u8> {
         };
         let size = usize::from_str_radix(size_str, 8).unwrap_or(0);
         // Skip 512-byte header + size rounded up to the next 512.
-        offset += 512 + ((size + 511) / 512) * 512;
+        offset += 512 + usize::div_ceil(size, 512) * 512;
     }
 }
 
@@ -464,12 +464,12 @@ pub fn install_libchecker_from_archive(
         // pax_global_header is a tar-side metadata record. Reading it as
         // a regular file consumes bytes from the underlying stream and
         // breaks subsequent entries. Skip entirely.
-        if raw_path == std::path::PathBuf::from("pax_global_header")
+        if raw_path.as_os_str() == "pax_global_header"
             || raw_path
                 .components()
                 .next()
-                .map(|c| c.as_os_str().to_string_lossy().to_string())
-                == Some("pax_global_header".to_string())
+                .map(|c| c.as_os_str())
+                == Some(std::ffi::OsStr::new("pax_global_header"))
         {
             continue;
         }

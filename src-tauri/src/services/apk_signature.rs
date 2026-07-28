@@ -252,12 +252,13 @@ pub struct SignatureInfo {
 /// 2048+ RSA / 256+ EC is "acceptable", 3072+ RSA / 384+ EC is "strong".
 /// We deliberately do not surface anything as "strong" for RSA-2048 only
 /// because long-lived signing keys should plan ahead.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum KeyStrength {
     Weak,
     Acceptable,
     Strong,
+    #[default]
     Unknown,
 }
 
@@ -288,12 +289,6 @@ impl KeyStrength {
             },
             _ => KeyStrength::Unknown,
         }
-    }
-}
-
-impl Default for KeyStrength {
-    fn default() -> Self {
-        KeyStrength::Unknown
     }
 }
 
@@ -670,7 +665,7 @@ fn parse_signer_header(line: &str) -> Option<SignerHeader> {
     let lower_tail: String = chars.collect();
     let lower_trim = lower_tail.trim_start();
     if lower_trim.starts_with("certificate dn:") {
-        let value = strip_after(&trimmed, "certificate DN:").unwrap_or_default();
+        let value = strip_after(trimmed, "certificate DN:").unwrap_or_default();
         if value.is_empty() {
             return None;
         }
@@ -681,7 +676,7 @@ fn parse_signer_header(line: &str) -> Option<SignerHeader> {
         });
     }
     if lower_trim.starts_with("issuer dn:") {
-        let value = strip_after(&trimmed, "issuer DN:").unwrap_or_default();
+        let value = strip_after(trimmed, "issuer DN:").unwrap_or_default();
         return Some(SignerHeader {
             idx,
             kind: SignerHeaderKind::IssuerDn,
@@ -933,8 +928,7 @@ fn strip_signing_blocking(
         writer
             .finish()
             .map_err(|error| AppError::Parse(format!("zip finish failed: {error}")))?;
-        let final_size = std::fs::metadata(&temp_path)?.len();
-        final_size
+        std::fs::metadata(&temp_path)?.len()
     };
 
     let new_zip = std::fs::read(&temp_path)?;

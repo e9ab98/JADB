@@ -14,9 +14,8 @@
 //!   - receivers-libs     → kind=component_class, type=receiver
 //!   - providers-libs     → kind=component_class, type=provider
 //!   - actions-libs       → kind=action
-//!   - static-libs        → kind=manifest (heuristic contains; static
-//!                          libraries are not introspectable from aapt2
-//!                          alone, so we fall back to substring matching)
+//!   - static-libs        → kind=manifest (heuristic substring match;
+//!     fallback for content not introspectable via aapt2)
 
 use crate::services::rule_manager::{Rule, RuleSet};
 use serde_json::{json, Value};
@@ -120,7 +119,7 @@ fn categories() -> Vec<(Vec<&'static str>, &'static str, &'static str, Builder)>
 /// to an existing directory under `root`. Returns `None` when no
 /// alias matches, so the caller can simply `continue` past the
 /// category.
-fn pick_alias<'a>(root: &Path, aliases: &'a [&'static str]) -> Option<PathBuf> {
+fn pick_alias(root: &Path, aliases: &[&'static str]) -> Option<PathBuf> {
     for a in aliases {
         let d = root.join(a);
         if d.is_dir() {
@@ -174,6 +173,7 @@ fn convert_native_libs(dir: &Path) -> Vec<Rule> {
     out
 }
 
+#[allow(clippy::type_complexity)]
 fn convert_components_in(component_type: &'static str) -> Box<dyn Fn(&Path) -> Vec<Rule>> {
     let ct = component_type;
     Box::new(move |dir| {
@@ -381,7 +381,7 @@ fn pick_locales(arr: &[Value]) -> (Option<&Value>, Option<&Value>) {
     let mut zh: Option<&Value> = None;
     for entry in arr {
         let locale = entry.get("locale").and_then(|x| x.as_str()).unwrap_or("");
-        if PRIMARY_LOCALES.iter().any(|p| *p == locale) {
+        if PRIMARY_LOCALES.contains(&locale) {
             if primary.is_none() {
                 primary = entry.get("data");
             }

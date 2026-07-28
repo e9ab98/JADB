@@ -20,6 +20,7 @@ pub fn build_apktool_b_args(src: &str, out: &str) -> Vec<String> {
     vec!["b".into(), src.into(), "-o".into(), out.into()]
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn repackage(
     app: &AppHandle,
     registry: &TaskRegistry,

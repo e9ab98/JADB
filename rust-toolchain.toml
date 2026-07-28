@@ -1,0 +1,23 @@
+# rust-toolchain.toml — pins the Rust version this repo compiles + lints against.
+#
+# Why pinned (rather than `stable`):
+#   - Reproducible CI: matches the pinned `dtolnay/rust-toolchain@1.91.1`
+#     in .github/workflows/*.yml.
+#   - Reproducible local dev: `cargo`/`cargo clippy` from any directory
+#     inside this repo auto-selects 1.91.1, regardless of what
+#     `rustup default` is set to globally.
+#   - Lint stability: clippy's default lint set evolves with each
+#     stable release. Without a pin, every CI run catches potentially
+#     *new* lints on previously-green code, which is not what you want
+#     for an LDF project. Pinning to 1.91.1 freezes the lint set.
+#
+# How to bump (when you intentionally want to):
+#   1. Update `channel` here.
+#   2. Update `rust-toolchain` references in .github/workflows/*.yml to
+#      the matching version.
+#   3. Run `cargo clippy --all-targets -- -D warnings` locally and
+#      triage whatever new lints fire.
+[toolchain]
+channel = "1.91.1"
+profile = "minimal"
+components = ["clippy", "rustfmt"]

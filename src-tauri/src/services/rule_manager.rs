@@ -117,13 +117,13 @@ enum ComponentKind {
 
 impl ComponentKind {
     fn matches_str(self, s: &str) -> bool {
-        match (self, s) {
-            (ComponentKind::Activity, "activity") => true,
-            (ComponentKind::Service, "service") => true,
-            (ComponentKind::Receiver, "receiver") => true,
-            (ComponentKind::Provider, "provider") => true,
-            _ => false,
-        }
+        matches!(
+            (self, s),
+            (ComponentKind::Activity, "activity")
+                | (ComponentKind::Service, "service")
+                | (ComponentKind::Receiver, "receiver")
+                | (ComponentKind::Provider, "provider"),
+        )
     }
 }
 

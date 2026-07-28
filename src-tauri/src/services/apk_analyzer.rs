@@ -6,6 +6,11 @@ use std::path::Path;
 use std::process::Stdio;
 use tokio::process::Command;
 
+/// All `.so` files inside an APK, grouped by ABI (e.g. "arm64-v8a",
+/// "x86_64"). Value of each entry is the **full archive paths** under
+/// `lib/<abi>/`, sorted and deduped per ABI by `extract_native_libs`.
+pub type NativeLibsByArch = std::collections::BTreeMap<String, Vec<String>>;
+
 /// All fields exposed to the frontend; the Rust side keeps everything
 /// as plain types and `serde` renders the JSON shape the UI expects.
 #[derive(Default, Serialize, Deserialize, Clone, Debug)]
@@ -24,7 +29,7 @@ pub struct ApkInfo {
     pub providers: Vec<String>,
     pub intent_actions: Vec<String>,
     pub native_libs: Vec<String>,
-    pub native_libraries: std::collections::BTreeMap<String, Vec<String>>,
+    pub native_libraries: NativeLibsByArch,
     pub tech_stack: Vec<String>,
     pub insights: Vec<String>,
     pub raw_badging: String,
@@ -202,7 +207,7 @@ fn unquote_single(s: &str) -> String {
     t.to_string()
 }
 
-fn extract_attr<'a>(s: &'a str, key: &str) -> Option<String> {
+fn extract_attr(s: &str, key: &str) -> Option<String> {
     // Pull `value` from any of:
     //   key='value'                          -- aapt2 dump badging
     //   key="value"                          -- aapt2 dump xmltree, plain attr
@@ -414,12 +419,11 @@ pub async fn analyze(settings: &Settings, apk_path: &Path) -> AppResult<ApkInfo>
 
 pub fn extract_native_libs(
     apk_path: &Path,
-) -> AppResult<(Vec<String>, std::collections::BTreeMap<String, Vec<String>>)> {
+) -> AppResult<(Vec<String>, NativeLibsByArch)> {
     let file = std::fs::File::open(apk_path).map_err(AppError::Io)?;
     let mut zip = zip::ZipArchive::new(file).map_err(|e| AppError::Parse(e.to_string()))?;
     let mut all: Vec<String> = Vec::new();
-    let mut grouped: std::collections::BTreeMap<String, Vec<String>> =
-        std::collections::BTreeMap::new();
+    let mut grouped: NativeLibsByArch = NativeLibsByArch::new();
     for i in 0..zip.len() {
         let entry = zip
             .by_index(i)

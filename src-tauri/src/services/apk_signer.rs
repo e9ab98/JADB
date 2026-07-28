@@ -132,6 +132,7 @@ fn bool_arg(value: bool) -> &'static str {
     if value { "true" } else { "false" }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn build_apksigner_rotation_args(
     apksigner_jar: &str,
     aligned_apk: &str,
@@ -442,7 +443,7 @@ pub fn find_signed_apk(apk: &str) -> Option<String> {
         let is_apk = path
             .extension()
             .and_then(|extension| extension.to_str())
-            .map_or(false, |extension| extension.eq_ignore_ascii_case("apk"));
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("apk"));
         if !is_apk {
             continue;
         }
@@ -470,6 +471,7 @@ pub fn find_signed_apk(apk: &str) -> Option<String> {
     best.map(|(_, path)| path.to_string_lossy().into_owned())
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn run_rotation_signing(
     app: &AppHandle,
     task_id: &str,

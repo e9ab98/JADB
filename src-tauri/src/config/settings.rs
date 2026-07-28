@@ -3,34 +3,24 @@ use serde::{Deserialize, Serialize};
 use std::path::Path;
 use tokio::fs;
 
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Default, Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum Language {
+    #[default]
     ZhCn,
     En,
 }
 
-impl Default for Language {
-    fn default() -> Self {
-        Language::ZhCn
-    }
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Default, Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum ThemeMode {
+    #[default]
     System,
     Light,
     Dark,
 }
 
-impl Default for ThemeMode {
-    fn default() -> Self {
-        ThemeMode::System
-    }
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Default, Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct Settings {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -57,24 +47,6 @@ pub struct Settings {
     pub language: Language,
     #[serde(default)]
     pub theme: ThemeMode,
-}
-
-impl Default for Settings {
-    fn default() -> Self {
-        Self {
-            aapt_path: None,
-            adb_path: None,
-            apktool_path: None,
-            uber_apk_signer_path: None,
-            apksigner_path: None,
-            android_build_tools_dir: None,
-            jadx_dir: None,
-            rules_path: None,
-            rules_download_url: None,
-            language: Language::default(),
-            theme: ThemeMode::default(),
-        }
-    }
 }
 
 /// Deserialise a `Option<Option<T>>` so that JSON `null` is treated as

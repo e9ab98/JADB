@@ -1,3 +1,9 @@
+// Setup reads as `let mut info = ApkInfo::default(); info.field = X;`
+// which clippy pedantically suggests restructuring as struct-update
+// syntax. The current pattern is clearer for tests that tweak one
+// or two fields on top of a default; silence the lint file-wide.
+#![allow(clippy::field_reassign_with_default)]
+
 use jadb_lib::services::apk_analyzer::ApkInfo;
 use jadb_lib::services::rule_manager::{evaluate, load_all, Rule, RuleResult};
 use serde_json::json;
@@ -23,7 +29,7 @@ fn rule_permission(id: &str, pattern: &str, severity: &str) -> Rule {
 #[test]
 fn permission_glob_matches() {
     let r = rule_permission("r1", "android.permission.ACCESS_*LOCATION*", "info");
-    let res = evaluate(&[r.clone()], "rs1", &info_with_perm("android.permission.ACCESS_FINE_LOCATION"));
+    let res = evaluate(std::slice::from_ref(&r), "rs1", &info_with_perm("android.permission.ACCESS_FINE_LOCATION"));
     assert_eq!(res.len(), 1);
     assert!(res[0].matched);
     assert_eq!(res[0].rule_id, "r1");

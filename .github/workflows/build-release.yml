@@ -108,8 +108,12 @@ jobs:
           node-version: "22"
           cache: "pnpm"
 
+      # Pinned to 1.91.1 — see rust-toolchain.toml for the full reasoning.
+      # Bump here AND in rust-toolchain.toml together; clippy's default
+      # lint set evolves with each stable release, so a stale pin will
+      # eventually start catching new lints on green code.
       - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.91.1
         with:
           targets: ${{ matrix.target }}
 

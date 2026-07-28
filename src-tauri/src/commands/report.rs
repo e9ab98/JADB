@@ -43,7 +43,7 @@ pub async fn export_apk_report(
     let len = bytes.len() as u64;
     tokio::fs::write(&dest, bytes)
         .await
-        .map_err(|e| AppError::Io(e))?;
+        .map_err(AppError::Io)?;
 
     Ok(ExportReportResult {
         dest_path: args.dest_path,
