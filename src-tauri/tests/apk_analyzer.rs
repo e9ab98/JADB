@@ -77,7 +77,7 @@ fn apk_info_default_has_empty_intent_actions_and_native_libs() {
 }
 
 #[test]
-fn extract_native_libs_returns_unique_basenames() {
+fn extract_native_libs_groups_by_abi_returns_full_paths() {
     use jadb_lib::services::apk_analyzer::extract_native_libs;
     use std::io::Write;
 
@@ -89,16 +89,20 @@ fn extract_native_libs_returns_unique_basenames() {
         let f = std::fs::File::create(&apk).unwrap();
         let mut zw = zip::ZipWriter::new(f);
         let opts = zip::write::SimpleFileOptions::default();
-        // Two ABIs carrying the same `libfoo.so` — basename should dedupe.
+        // Two ABIs carrying the same `libfoo.so` — full paths are kept
+        // (one per ABI), not basenamed and not deduped across ABIs.
         zw.start_file("lib/arm64-v8a/libfoo.so", opts).unwrap();
         zw.write_all(b"foo-arm64").unwrap();
         zw.start_file("lib/x86_64/libfoo.so", opts).unwrap();
         zw.write_all(b"foo-x64").unwrap();
         zw.start_file("lib/armeabi-v7a/libbar.so", opts).unwrap();
         zw.write_all(b"bar").unwrap();
-        // Negative cases: not under lib/ or not a .so.
+        // Negative case: NOT under `lib/` — must not appear in result.
         zw.start_file("assets/index.html", opts).unwrap();
         zw.write_all(b"<html/>").unwrap();
+        // Edge case (current behavior): under `lib/<abi>/` but not a .so.
+        // `abi_from_path` matches the directory only, so this WILL appear.
+        // If a `.so` filter is ever added, this is the line to revisit.
         zw.start_file("lib/arm64-v8a/subdir/not-a-so.txt", opts).unwrap();
         zw.write_all(b"x").unwrap();
         zw.start_file("AndroidManifest.xml", opts).unwrap();
@@ -106,10 +110,18 @@ fn extract_native_libs_returns_unique_basenames() {
         zw.finish().unwrap();
     }
 
-    let libs = extract_native_libs(&apk).unwrap();
-    let mut sorted = libs.clone();
+    let (all, _grouped) = extract_native_libs(&apk).unwrap();
+    let mut sorted = all.clone();
     sorted.sort();
-    assert_eq!(sorted, vec!["libbar.so".to_string(), "libfoo.so".to_string()]);
+    assert_eq!(
+        sorted,
+        vec![
+            "lib/arm64-v8a/libfoo.so".to_string(),
+            "lib/arm64-v8a/subdir/not-a-so.txt".to_string(),
+            "lib/armeabi-v7a/libbar.so".to_string(),
+            "lib/x86_64/libfoo.so".to_string(),
+        ]
+    );
 
     let _ = std::fs::remove_dir_all(&tmp);
 }

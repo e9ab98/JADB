@@ -1,6 +1,5 @@
 use crate::error::{AppError, AppResult};
 use serde::{Deserialize, Serialize};
-use log::warn;
 use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Manager};
 use tokio::task;

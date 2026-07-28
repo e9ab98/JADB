@@ -774,6 +774,7 @@ fn check_webview_cleartext(manifest_xml: &str) -> bool {
 
 #[derive(Debug, Clone)]
 struct ExposedComponent {
+#[allow(dead_code)]
     name: String,
     kind: String,
 }
