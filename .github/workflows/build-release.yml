@@ -164,3 +164,19 @@ jobs:
           releaseDraft: false
           prerelease: false
           args: --target ${{ matrix.target }} ${{ matrix.bundler_args }}
+
+  post-rename:
+    name: Normalize aarch64 \xe2\x86\x92 arm64 in release assets
+    needs: build-and-release
+    runs-on: ubuntu-latest
+    if: success()
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Rename aarch64 assets to arm64
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_REF_NAME: ${{ github.ref_name }}
+        run: bash scripts/ci/rename-aarch64-assets.sh
