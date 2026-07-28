@@ -152,13 +152,26 @@ async fn aapt2_status_installed_after_extract() {
     });
     let unzip_into = tdir.join(&os_dir_name);
     std::fs::create_dir_all(&unzip_into).unwrap();
-    // Drop a fake binary where the real install would put it.
-    std::fs::write(unzip_into.join("aapt2"), b"fake").unwrap();
+    // Drop a fake binary where the real install would put it. On Windows
+    // resolve_binary_path rewrites the binary_sub_path `aapt2` with a
+    // `.exe` suffix, so the fixture must also use `.exe` there —
+    // otherwise status_all reports installed=false because the lookup
+    // path doesn't exist.
+    let bin = if cfg!(target_os = "windows") { "aapt2.exe" } else { "aapt2" };
+    std::fs::write(unzip_into.join(bin), b"fake").unwrap();
 
     let status = status_all(dir, &Settings::default()).await;
     let aapt2 = status.iter().find(|s| s.name == "aapt2").expect("aapt2 status missing");
     assert!(aapt2.installed, "aapt2 should report installed; got path={:?}", aapt2.path);
-    assert!(aapt2.path.as_deref().unwrap_or("").ends_with(&format!("{os_dir_name}/aapt2")), "path={:?}", aapt2.path);
+    // Use Path::ends_with (&Path) so the suffix check is OS-separator-aware.
+    let expected_tail = std::path::PathBuf::from(&os_dir_name).join(bin);
+    let actual = aapt2.path.as_deref().unwrap_or("");
+    assert!(
+        std::path::Path::new(actual).ends_with(&expected_tail),
+        "path={:?} expected to end with {:?}",
+        aapt2.path,
+        expected_tail,
+    );
 
     let _ = std::fs::remove_dir_all(dir);
 }
@@ -184,12 +197,18 @@ fn fixture_adb() -> ToolEntry {
 fn adb_entry_resolves_to_binary() {
     let e = fixture_adb();
     let resolved = resolve_binary_path(&e, std::path::Path::new("/tmp/jadb")).unwrap();
-    let s = resolved.to_string_lossy();
     // platform-tools has no {os} placeholder, so the resolved path should land directly there.
-    let expected_tail = if cfg!(target_os = "windows") {
-        "platform-tools/adb.exe"
+    // Use Path::ends_with (&Path) instead of &str::ends_with so the comparison is
+    // OS-separator-aware: on Windows the actual tail is "\\platform-tools\\adb.exe"
+    // while the previous literal "platform-tools/adb.exe" mixed slash directions.
+    let expected_tail = std::path::PathBuf::from("platform-tools").join(if cfg!(target_os = "windows") {
+        "adb.exe"
     } else {
-        "platform-tools/adb"
-    };
-    assert!(s.ends_with(expected_tail), "got {s}");
+        "adb"
+    });
+    assert!(
+        resolved.ends_with(&expected_tail),
+        "got {}",
+        resolved.display(),
+    );
 }
