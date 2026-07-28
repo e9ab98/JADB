@@ -10,6 +10,15 @@
       "binary_sub_path": null
     },
     {
+      "name": "uber-apk-signer",
+      "version": "1.3.0",
+      "download_url": "https://github.com/patrickfav/uber-apk-signer/releases/download/v1.3.0/uber-apk-signer-1.3.0.jar",
+      "file_name": "uber-apk-signer-1.3.0.jar",
+      "config_name": "uber_apk_signer_path",
+      "unzip_dir": null,
+      "binary_sub_path": null
+    },
+    {
       "name": "android-build-tools",
       "version": "36.0.0",
       "platforms": {

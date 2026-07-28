@@ -350,3 +350,52 @@ fn eval_action(rule: &Rule, info: &ApkInfo) -> (bool, Option<String>) {
     }
     (false, None)
 }
+
+/// Result of evaluating a single `Rule` against an `ApkInfo`. Mirrors what
+/// the legacy rule report UI expected per-rule (matched + evidence); the
+/// newer `RuleReport` / `evaluate_components` API is per-component.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RuleResult {
+    pub matched: bool,
+    pub rule_id: String,
+    pub rule_set_id: String,
+    pub severity: String,
+    pub evidence: Option<String>,
+    /// Human-readable label: `rule.description` if present, else `rule.id`.
+    pub message: String,
+}
+
+/// Per-rule evaluator dispatcher.
+///
+/// For each `Rule` in `rules`, dispatch to the matching `eval_*` by
+/// `rule.kind`. Unknown kinds fall through to `matched=false, evidence=None`
+/// rather than panicking — rule packs can carry experimental `kind`s that
+/// older engines just ignore.
+///
+/// `rule_set_id` is stamped onto every produced `RuleResult` so the UI can
+/// attribute a hit to the specific rule pack that emitted it.
+pub fn evaluate(rules: &[Rule], rule_set_id: &str, info: &ApkInfo) -> Vec<RuleResult> {
+    rules
+        .iter()
+        .map(|r| {
+            let (matched, evidence) = match r.kind.as_str() {
+                "permission" => eval_permission(r, info),
+                "component" => eval_component(r, info),
+                "sdk" => eval_sdk(r, info),
+                "manifest" | "manifest_stub" => eval_manifest_stub(r, info),
+                "native_library" => eval_native_library(r, info),
+                "component_class" => eval_component_class(r, info),
+                "action" => eval_action(r, info),
+                _ => (false, None),
+            };
+            RuleResult {
+                matched,
+                rule_id: r.id.clone(),
+                rule_set_id: rule_set_id.to_string(),
+                severity: r.severity.clone(),
+                evidence,
+                message: r.description.clone().unwrap_or_else(|| r.id.clone()),
+            }
+        })
+        .collect()
+}

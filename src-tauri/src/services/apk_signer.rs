@@ -668,3 +668,39 @@ fn idsig_path(apk: &Path) -> PathBuf {
     value.push(".idsig");
     PathBuf::from(value)
 }
+
+/// Build the CLI argument vector for `uber-apk-signer --ks`. The JAR is
+/// invoked by `java -jar`; this function returns only the tail of args
+/// (the `java` half is composed by the caller).
+///
+/// Mirrors `build_apksigner_rotation_args` but for the simpler
+/// "single keystore, one signing round" case used when the user uploads
+/// a brand-new APK + keystore in Settings → Sign.
+///
+/// Note: passwords are passed as **plain CLI strings** rather than as
+/// `env:` references because uber-apk-signer does not understand `env:`
+/// the way apksigner does. Callers should ensure the command-line is
+/// not visible to other processes during signing.
+pub fn build_uber_args(
+    jar: &str,
+    apk: &str,
+    keystore: &str,
+    store_password: &str,
+    alias: &str,
+    key_password: &str,
+) -> Vec<String> {
+    vec![
+        "-jar".into(),
+        jar.into(),
+        "--apks".into(),
+        apk.into(),
+        "--ks".into(),
+        keystore.into(),
+        "--ksPass".into(),
+        store_password.into(),
+        "--ksAlias".into(),
+        alias.into(),
+        "--ksKeyPass".into(),
+        key_password.into(),
+    ]
+}

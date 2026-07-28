@@ -917,6 +917,7 @@ fn build_security_report(info: &ApkInfo, manifest_xml: &str) -> SecurityReport {
     SecurityReport { risks, score }
 }
 
+#[allow(dead_code)]
 fn parse_repeat(body: &str) -> Option<(usize, usize)> {
     let total = body.lines().filter(|l| !l.trim().is_empty()).count();
     if total < 4 {

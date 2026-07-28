@@ -854,6 +854,7 @@ fn strip_signing_blocking(
     use std::collections::HashSet;
     
 
+    #[allow(dead_code)]
     const COPY_BUFFER_SIZE: usize = 1024 * 1024;
 
     progress::emit_progress(app, task_id, 0.0, "读取 APK");
@@ -1050,6 +1051,7 @@ fn companion_idsig_path(apk: &Path) -> PathBuf {
 }
 
 #[derive(Clone)]
+#[allow(dead_code)]
 struct Pair {
     id: u32,
     data: Vec<u8>,
@@ -1143,6 +1145,7 @@ fn read_apk_signing_block_pairs(
     Ok((pairs, had_signature_pair))
 }
 
+#[allow(dead_code)]
 fn build_apk_signing_block(pairs: &[Pair]) -> Vec<u8> {
     let mut pairs_data = Vec::new();
     for pair in pairs {
