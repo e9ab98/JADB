@@ -16,7 +16,7 @@
 
 ## 环境要求
 
-- macOS 10.15 或更高(Windows 计划在 v0.2)
+- macOS 10.15 或更高 / Windows 10 1809 或更高
 - Node.js ≥ 20
 - pnpm ≥ 9
 - Rust stable ≥ 1.78
@@ -41,14 +41,35 @@ pnpm lint
 (cd src-tauri && cargo test)
 ```
 
-## 打包(macOS)
+## 打包(macOS / Windows)
 
 ```bash
 pnpm tauri build
-# 或使用 scripts/release.sh(跑完整 QA + 打 dmg)
+# 或使用 scripts/release.sh(本地烟测版,只 build,不上传)
 ```
 
-产物:`src-tauri/target/release/bundle/dmg/JADB_0.1.0_aarch64.dmg`(Apple Silicon)和 `JADB_0.1.0_x64.dmg`(Intel)。首次启动可能需要**右键 → 打开**以绕过 Gatekeeper。
+### 正式发布(推荐:CI 自动)
+
+`.github/workflows/build-release.yml` 在打 tag 时自动跑 4 个矩阵
+(darwin-arm64 / darwin-x64 / windows-x64 / windows-arm64),签名后上传到
+GitHub Release 并生成 `latest.json`(客户端 updater 直接读取):
+
+```bash
+git tag v0.1.0
+git push origin main --tags
+```
+
+CI 上传完毕后即可在客户端的"关于 → 检查更新"里收到新版本。
+
+### 本地手动(debug 用)
+
+`pnpm tauri build` 仅产出当前主机的格式:
+
+- macOS:`src-tauri/target/release/bundle/{dmg,macos}/JADB_0.1.0_*.dmg`
+- Windows:`src-tauri/target/release/bundle/{msi,nsis}/JADB_0.1.0_*.msi`
+
+macOS 首次启动可能需要**右键 → 打开**以绕过 Gatekeeper(未公证)。
+
 
 ## 首次使用
 
@@ -63,10 +84,10 @@ pnpm tauri build
 
 ## 已知限制
 
-- 仅 macOS(`.dmg`);Windows(`.msi`)在 v0.2
+- macOS(`dmg`)+ Windows(`msi`),覆盖 x86_64 与 aarch64;由 CI 矩阵构建(见上文)
 - 仅英文 / 简体中文 UI
 - LibChecker 规则的 `manifest` 类型当前仅支持简单的 `contains` 字符串匹配;完整 XPath 子集待后续扩展
-- 自动更新基于 Tauri Updater 与 GitHub Releases，发布前需配置签名密钥
+- 自动更新基于 Tauri Updater 与 GitHub Releases;`TAURI_SIGNING_PRIVATE_KEY` 与 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` 必须配在 Repository Secrets 中,否则 `latest.json` 没法被客户端校验
 - Logo 是占位字母 "J",后续替换
 
 ## 项目结构
@@ -91,13 +112,14 @@ src-tauri/              # Rust 后端(Tauri 2)
     progress.rs         # 进度 / 日志 / 完成事件发射
   tests/                # cargo test 集成测试
   capabilities/         # Tauri 权限白名单
-  tauri.conf.json       # 打包配置(macOS dmg only)
+  tauri.conf.json       # 打包配置(目前 dmg + msi)
 
 docs/superpowers/
   specs/                # 设计文档
   plans/                # 12-Task 实施计划
 scripts/
-  release.sh            # 跑 QA + 打 dmg 的辅助脚本
+  release.sh            # 本地烟测脚本(qa + 当前主机 build,不上传)
+  check-version-drift.sh # 校验 package.json / tauri.conf.json / Cargo.toml 三处 version
   git-bootstrap.sh      # 仓库初始化辅助
 ```
 

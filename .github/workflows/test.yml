@@ -1,0 +1,60 @@
+name: Test
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*.*.*']
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  rust-checks:
+    name: Rust (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-14, windows-2022]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Check version drift
+        run: scripts/check-version-drift.sh
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Run tests
+        run: cd src-tauri && cargo test --all
+
+      - name: Clippy
+        run: cd src-tauri && cargo clippy --all-targets -- -D warnings
+
+  frontend-checks:
+    name: Frontend
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Check version drift
+        run: scripts/check-version-drift.sh
+
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm tsc --noEmit
