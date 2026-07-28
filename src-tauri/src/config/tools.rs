@@ -10,6 +10,7 @@ pub enum ToolName {
     Jadx,
     Aapt2,
     Adb,
+    Java,
 }
 
 impl ToolName {
@@ -21,6 +22,7 @@ impl ToolName {
             ToolName::Jadx => "jadx",
             ToolName::Aapt2 => "aapt2",
             ToolName::Adb => "adb",
+            ToolName::Java => "java",
         }
     }
 }
@@ -35,9 +37,20 @@ impl FromStr for ToolName {
             "jadx" => Ok(ToolName::Jadx),
             "aapt2" => Ok(ToolName::Aapt2),
             "adb" => Ok(ToolName::Adb),
+            "java" => Ok(ToolName::Java),
             other => Err(format!("unknown tool: {other}")),
         }
     }
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct PerOsNames {
+    #[serde(default)]
+    pub macos: Option<String>,
+    #[serde(default)]
+    pub linux: Option<String>,
+    #[serde(default)]
+    pub windows: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -54,6 +67,49 @@ pub struct ToolEntry {
     pub platforms: Option<Platforms>,
     #[serde(default)]
     pub binary_sub_path: Option<String>,
+    /// Optional override of `file_name` per OS. Used when the upstream
+    /// distribution ships different archive formats per platform (e.g.
+    /// Adoptium ships `.tar.gz` on mac/linux and `.zip` on Windows).
+    /// `{os_token}` placeholders are substituted at install time using
+    /// the same `os_token()` helper that already substitutes `{os}`.
+    #[serde(default)]
+    pub file_name_per_os: Option<PerOsNames>,
+}
+
+impl ToolEntry {
+    /// Resolve the on-disk filename for the current OS. Prefers the
+    /// per-OS override if present; otherwise falls back to `file_name`.
+    ///
+    /// Note: `os_token` is duplicated here (also defined in
+    /// `services::tool_manager`) because putting it in either shared
+    /// location would create a `config -> services -> config` import
+    /// cycle. The two implementations must stay in sync.
+    pub fn file_name_for_current_os(&self) -> String {
+        let token: &'static str = {
+            #[cfg(target_os = "macos")]
+            { "osx" }
+            #[cfg(target_os = "linux")]
+            { "linux" }
+            #[cfg(target_os = "windows")]
+            { "windows" }
+        };
+        let key = match token {
+            "osx" => "macos",
+            other => other,
+        };
+        if let Some(per_os) = &self.file_name_per_os {
+            let candidate = match key {
+                "macos" => per_os.macos.as_ref(),
+                "linux" => per_os.linux.as_ref(),
+                "windows" => per_os.windows.as_ref(),
+                _ => None,
+            };
+            if let Some(name) = candidate {
+                return name.replace("{os_token}", token);
+            }
+        }
+        self.file_name.replace("{os_token}", token)
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

@@ -214,6 +214,7 @@ fn is_supported_scheme(id: u32) -> bool {
 use crate::config::settings;
 use crate::progress;
 use crate::services::apk_signer::{self, TaskHandle};
+use crate::services::java_runtime;
 use crate::services::task_registry::TaskRegistry;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -397,7 +398,8 @@ pub async fn inspect_signature_inner(
         }
     };
 
-    let mut command = tokio::process::Command::new("java");
+    let runtime = java_runtime::resolve(settings, None)?;
+    let mut command = tokio::process::Command::new(&runtime.java_bin);
     command
         .arg("-Xmx1024M")
         .arg("-jar")

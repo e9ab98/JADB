@@ -30,7 +30,7 @@ docs/
 .DS_Store
 Thumbs.db
 *.swp
-
+.tauri/
 # Editor
 .idea/
 .vscode/

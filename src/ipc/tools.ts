@@ -7,7 +7,8 @@ export type ToolName =
   | 'android-build-tools'
   | 'jadx'
   | 'aapt2'
-  | 'adb';
+  | 'adb'
+  | 'java';
 
 export type ToolSource = 'bundled' | 'local' | 'fallback';
 

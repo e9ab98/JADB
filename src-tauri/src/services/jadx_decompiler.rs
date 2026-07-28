@@ -1,7 +1,9 @@
 use crate::config::settings::Settings;
 use crate::error::{AppError, AppResult};
 use crate::progress;
+use crate::services::java_runtime;
 use crate::services::task_registry::TaskRegistry;
+use tauri::Manager;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -86,6 +88,16 @@ pub async fn decompile(
         .ok_or_else(|| AppError::ToolMissing("jadx".into()))?;
     let bin = resolve_bin(Path::new(&jadx_dir));
 
+    // Resolve the Java runtime so the jadx shell wrapper can find it.
+    // Failure is non-fatal: if the host has a usable `java` we cannot
+    // detect (e.g. via a launcher we don't model), let the user see
+    // the wrapper's own error message instead of swallowing it here.
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| AppError::Config(e.to_string()))?;
+    let java_runtime = java_runtime::resolve(settings, Some(&dir)).ok();
+
     let task_id = uuid::Uuid::new_v4().to_string();
     let token = registry.register(&task_id);
 
@@ -95,6 +107,7 @@ pub async fn decompile(
     let apk_path = apk_path.to_string();
     let out_dir = out_dir.to_string();
     let bin_clone = bin.clone();
+    let java_clone = java_runtime;
 
     tokio::spawn(async move {
         let args = build_args(bin_clone.to_string_lossy().as_ref(), &apk_path, &out_dir, &options);
@@ -103,6 +116,20 @@ pub async fn decompile(
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(true);
+        if let Some(ref runtime) = java_clone {
+            cmd.env("JAVA_HOME", &runtime.java_home);
+            let mut path = std::env::var_os("PATH").unwrap_or_default();
+            let bin_dir = runtime.java_home.join("bin");
+            if bin_dir.is_dir() {
+                let mut combined = std::ffi::OsString::from(bin_dir.as_os_str());
+                if !path.is_empty() {
+                    combined.push(if cfg!(target_os = "windows") { ";" } else { ":" });
+                    combined.push(path);
+                }
+                path = combined;
+                cmd.env("PATH", path);
+            }
+        }
 
         progress::emit_progress(&app_clone, &task_id_clone, 0.0, "启动 jadx");
 

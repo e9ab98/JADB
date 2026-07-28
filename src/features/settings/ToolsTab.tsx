@@ -30,6 +30,7 @@ const DESCRIPTIONS: Record<ToolName, { label: string; desc: string }> = {
   jadx: { label: 'jadx', desc: 'Java 源码反编译' },
   aapt2: { label: 'aapt2', desc: 'APK 信息分析 (badging)' },
   adb: { label: 'adb', desc: 'Android Debug Bridge (设备通信 / pull / push)' },
+  java: { label: 'Java (JDK)', desc: 'JADX / APK 工具链 / 签名共用的 Java 运行时' },
 };
 
 /// Map a tool name to its `SettingsPatch` field. Centralised so we don't
@@ -48,6 +49,8 @@ function settingsKeyForTool(name: ToolName): keyof SettingsPatch {
       return 'uberApkSignerPath';
     case 'android-build-tools':
       return 'androidBuildToolsDir';
+    case 'java':
+      return 'javaDir';
   }
 }
 
@@ -286,6 +289,9 @@ export function ToolsTab() {
         case 'jadx':
           patch.jadxDir = path;
           break;
+        case 'java':
+          patch.javaDir = path;
+          break;
       }
       await patchSettings(patch);
       // suppress unused-var lint for `key` — kept for clarity / debugging.
@@ -320,6 +326,9 @@ export function ToolsTab() {
           break;
         case 'jadx':
           patch.jadxDir = null;
+          break;
+        case 'java':
+          patch.javaDir = null;
           break;
       }
       await patchSettings(patch);

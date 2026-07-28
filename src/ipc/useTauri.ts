@@ -11,6 +11,7 @@ export type Settings = {
   apksignerPath: string | null;
   androidBuildToolsDir: string | null;
   jadxDir: string | null;
+  javaDir: string | null;
   rulesPath: string | null;
   rulesDownloadUrl: string | null;
   language: Language;
@@ -25,6 +26,7 @@ export type SettingsPatch = {
   apksignerPath?: string | null | undefined;
   androidBuildToolsDir?: string | null | undefined;
   jadxDir?: string | null | undefined;
+  javaDir?: string | null | undefined;
   rulesPath?: string | null | undefined;
   rulesDownloadUrl?: string | null | undefined;
   language?: Language;

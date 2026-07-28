@@ -23,8 +23,8 @@
       "version": "36.0.0",
       "platforms": {
         "macos": "https://dl.google.com/android/repository/build-tools_r36_macosx.zip",
-        "linux": "https://dl.google.com/android/repository/build-tools_r36-linux.zip",
-        "windows": "https://dl.google.com/android/repository/build-tools_r36-windows.zip"
+        "linux": "https://dl.google.com/android/repository/build-tools_r36_linux.zip",
+        "windows": "https://dl.google.com/android/repository/build-tools_r36_windows.zip"
       },
       "file_name": "build-tools_r36-{os}.zip",
       "config_name": "android_build_tools_dir",
@@ -65,6 +65,24 @@
       "config_name": "adb_path",
       "unzip_dir": "platform-tools",
       "binary_sub_path": "adb"
+    },
+    {
+      "name": "java",
+      "version": "21",
+      "platforms": {
+        "macos": "https://api.adoptium.net/v3/binary/latest/21/ga/mac/x64/jdk/hotspot/normal/eclipse?project=jdk",
+        "linux": "https://api.adoptium.net/v3/binary/latest/21/ga/linux/x64/jdk/hotspot/normal/eclipse?project=jdk",
+        "windows": "https://api.adoptium.net/v3/binary/latest/21/ga/windows/x64/jdk/hotspot/normal/eclipse?project=jdk"
+      },
+      "file_name_per_os": {
+        "macos": "OpenJDK21U-jdk_x64_{os_token}_hotspot.tar.gz",
+        "linux": "OpenJDK21U-jdk_x64_{os_token}_hotspot.tar.gz",
+        "windows": "OpenJDK21U-jdk_x64_{os_token}_hotspot.zip"
+      },
+      "file_name": "OpenJDK21U-jdk_x64_{os_token}_hotspot.zip",
+      "config_name": "java_dir",
+      "unzip_dir": null,
+      "binary_sub_path": null
     }
   ]
 }

@@ -84,6 +84,28 @@ pub fn resolve_binary_path(entry: &ToolEntry, app_data_dir: &Path) -> AppResult<
             };
             Ok(dir.join(sub).join(bin))
         }
+        ToolName::Java => {
+            // The Adoptium Temurin archive contains a single shared
+            // top-level directory (`jdk-21.0.12+8/`); `extract_*`
+            // strips it during install so the JDK contents land
+            // directly under `dir`. The internal layout then differs
+            // by OS:
+            //   - linux/windows: `<dir>/bin/java[.exe]`
+            //   - macOS:          `<dir>/Contents/Home/bin/java`
+            // We probe the layout that matches the current OS, and
+            // fall back to the other for cross-debugging.
+            let bin_name = if cfg!(target_os = "windows") {
+                "java.exe"
+            } else {
+                "java"
+            };
+            let primary = dir.join("bin").join(bin_name);
+            if primary.exists() {
+                Ok(primary)
+            } else {
+                Ok(dir.join("Contents").join("Home").join("bin").join(bin_name))
+            }
+        }
     }
 }
 
@@ -95,6 +117,7 @@ fn path_for_tool(s: &Settings, name: &ToolName) -> Option<String> {
         ToolName::Jadx => s.jadx_dir.clone(),
         ToolName::Aapt2 => s.aapt_path.clone(),
         ToolName::Adb => s.adb_path.clone(),
+        ToolName::Java => s.java_dir.clone(),
     }
 }
 
@@ -284,7 +307,7 @@ fn android_build_tools_status(
     }
 }
 
-fn os_token() -> &'static str {
+pub fn os_token() -> &'static str {
     #[cfg(target_os = "macos")]
     {
         "osx"
@@ -301,19 +324,41 @@ fn os_token() -> &'static str {
 
 fn resolve_url_and_filename(entry: &ToolEntry) -> AppResult<(String, String)> {
     if let Some(platforms) = &entry.platforms {
-        Ok((platforms.url().to_string(), entry.file_name.clone()))
+        Ok((platforms.url().to_string(), entry.file_name_for_current_os()))
     } else if entry.download_url.is_empty() {
         Err(AppError::Config(format!(
             "{} has no download URL or platforms",
             entry.name.as_str()
         )))
     } else {
-        Ok((entry.download_url.clone(), entry.file_name.clone()))
+        Ok((entry.download_url.clone(), entry.file_name_for_current_os()))
     }
 }
 
 async fn download_with_progress(app: &AppHandle, name: &str, url: &str, dest: &Path) -> AppResult<()> {
-    let client = reqwest::Client::new();
+    use std::time::{Duration, Instant};
+
+    // Build a client with explicit timeouts so a stuck TCP connection
+    // surfaces as an error instead of hanging forever. Adoptium's API
+    // bounces through GitHub's release CDN, which has historically
+    // dropped long-lived connections from CI-like IPs; without a
+    // read timeout the user just sees the progress bar freeze at
+    // some intermediate byte count.
+    let client = reqwest::Client::builder()
+        // 30s to establish / receive first byte
+        .connect_timeout(Duration::from_secs(30))
+        // 5min total time-to-finish; the largest archive we ship is
+        // ~210MB so this leaves plenty of headroom on slow links.
+        .timeout(Duration::from_secs(300))
+        // Identify ourselves — some CDNs (notably GitHub assets via
+        // SAS tokens) reject requests with the default empty UA.
+        .user_agent(concat!("jadb/", env!("CARGO_PKG_VERSION")))
+        // reqwest is built without the gzip/brotli feature flags
+        // (see Cargo.toml), so it neither sends Accept-Encoding nor
+        // decompresses on the fly — the on-disk file is exactly the
+        // bytes the server sent, which is what extract_* expects.
+        .build()
+        .map_err(|e| AppError::Config(format!("reqwest client build failed: {e}")))?;
     let resp = client
         .get(url)
         .send()
@@ -328,18 +373,62 @@ async fn download_with_progress(app: &AppHandle, name: &str, url: &str, dest: &P
     }
     let mut file = fs::File::create(dest).await?;
     let mut downloaded: u64 = 0;
+    // Throttle progress events to ~4 Hz so a single large download
+    // cannot flood the Tauri IPC channel (which would back-pressure
+    // this loop and stall the byte stream). 250ms is short enough
+    // to feel live but small enough that even a 200MB file emits
+    // only ~800 events instead of tens of thousands.
+    let mut last_emit = Instant::now() - Duration::from_millis(250);
+    let mut last_emit_downloaded: u64 = 0;
     while let Some(chunk) = stream.next().await {
         let bytes = chunk.map_err(|e| AppError::Config(e.to_string()))?;
         file.write_all(&bytes).await?;
         downloaded += bytes.len() as u64;
-        let _ = app.emit(
-            "tool://install-progress",
-            serde_json::json!({ "name": name, "downloaded": downloaded, "total": total }),
-        );
+        if last_emit.elapsed() >= Duration::from_millis(250) {
+            // Only emit when the count actually moved, otherwise an
+            // idle-but-open connection would still spam the channel.
+            if downloaded != last_emit_downloaded {
+                let _ = app.emit(
+                    "tool://install-progress",
+                    serde_json::json!({
+                        "name": name,
+                        "downloaded": downloaded,
+                        "total": total,
+                    }),
+                );
+                last_emit = Instant::now();
+                last_emit_downloaded = downloaded;
+            }
+        }
     }
     file.flush().await?;
     if downloaded == 0 {
         return Err(AppError::Config("download returned an empty file".into()));
+    }
+    // Final progress event so the UI hits 100% even if the last
+    // 250ms window had no chunks.
+    let _ = app.emit(
+        "tool://install-progress",
+        serde_json::json!({
+            "name": name,
+            "downloaded": downloaded,
+            "total": if total == 0 { downloaded } else { total },
+        }),
+    );
+    // Sanity-check: if the server advertised a Content-Length and we
+    // landed materially short (>= 1MB gap), treat it as a truncated
+    // download rather than a successful one. This catches the
+    // "stuck at 7MB" failure mode where the TCP connection dropped
+    // silently and the stream's EOF came from the kernel, not the
+    // server.
+    if total > 0 && total.saturating_sub(downloaded) >= 1_000_000 {
+        let _ = std::fs::remove_file(dest);
+        return Err(AppError::Config(format!(
+            "download truncated: got {} of {} bytes ({} missing)",
+            downloaded,
+            total,
+            total - downloaded
+        )));
     }
     Ok(())
 }
@@ -415,6 +504,86 @@ pub async fn extract_zip(zip_path: &Path, dest_dir: &Path) -> AppResult<()> {
                 std::io::copy(&mut file, &mut out_file)?;
                 #[cfg(unix)]
                 if let Some(mode) = file.unix_mode() {
+                    use std::os::unix::fs::PermissionsExt;
+                    std::fs::set_permissions(&out, std::fs::Permissions::from_mode(mode))?;
+                }
+            }
+        }
+        Ok(())
+    })
+    .await
+    .map_err(|e| AppError::Config(e.to_string()))??;
+    Ok(())
+}
+
+/// Extract a `.tar.gz` archive into `dest_dir`, stripping a single
+/// shared top-level prefix when every entry shares one (mirrors the
+/// zip path so callers do not need to special-case the format).
+async fn extract_tar_gz(archive_path: &Path, dest_dir: &Path) -> AppResult<()> {
+    use flate2::read::GzDecoder;
+    let archive_path = archive_path.to_path_buf();
+    let dest_dir = dest_dir.to_path_buf();
+    tokio::task::spawn_blocking(move || -> AppResult<()> {
+        let file = std::fs::File::open(&archive_path)?;
+        let decoder = GzDecoder::new(file);
+        let mut archive = tar::Archive::new(decoder);
+        std::fs::create_dir_all(&dest_dir)?;
+        // First pass: collect every entry's path so we can detect the
+        // shared top-level prefix (Adoptium ships everything under
+        // `jdk-21.0.x+build/`; we strip it for parity with the zip path).
+        let entries: Vec<std::path::PathBuf> = {
+            let mut v = Vec::new();
+            for entry in archive.entries()? {
+                v.push(entry?.path()?.to_path_buf());
+            }
+            v
+        };
+        let strip_prefix: Option<std::path::PathBuf> = (|| -> Option<std::path::PathBuf> {
+            // The zip path treats a single shared prefix as one to
+            // strip; mirror that here. The first non-empty entry
+            // gives us the candidate prefix; we then confirm every
+            // entry starts with `<prefix>/`.
+            let first = entries.iter().find(|p| !p.as_os_str().is_empty())?;
+            let first_str = first.to_str()?;
+            let (prefix, _) = first_str.split_once('/')?;
+            let prefix_path = std::path::PathBuf::from(prefix);
+            let all_match = entries
+                .iter()
+                .filter(|p| !p.as_os_str().is_empty())
+                .all(|p| p.starts_with(&prefix_path));
+            all_match.then(|| prefix_path)
+        })();
+        // Second pass: actually extract with the (possibly stripped)
+        // paths. We re-open the archive because tar::Archive's
+        // entries iterator consumes the underlying reader.
+        let file = std::fs::File::open(&archive_path)?;
+        let decoder = GzDecoder::new(file);
+        let mut archive = tar::Archive::new(decoder);
+        for entry in archive.entries()? {
+            let mut entry = entry?;
+            let raw = entry.path()?.to_path_buf();
+            let stripped = match &strip_prefix {
+                Some(prefix) => match raw.strip_prefix(prefix) {
+                    Ok(rest) => rest.to_path_buf(),
+                    Err(_) => raw,
+                },
+                None => raw,
+            };
+            let out = if stripped.as_os_str().is_empty() {
+                dest_dir.clone()
+            } else {
+                dest_dir.join(&stripped)
+            };
+            if entry.header().entry_type().is_dir() {
+                std::fs::create_dir_all(&out)?;
+            } else {
+                if let Some(p) = out.parent() {
+                    std::fs::create_dir_all(p)?;
+                }
+                let mut out_file = std::fs::File::create(&out)?;
+                std::io::copy(&mut entry, &mut out_file)?;
+                #[cfg(unix)]
+                if let Ok(mode) = entry.header().mode() {
                     use std::os::unix::fs::PermissionsExt;
                     std::fs::set_permissions(&out, std::fs::Permissions::from_mode(mode))?;
                 }
@@ -510,7 +679,30 @@ pub async fn install(app: &AppHandle, name: ToolName) -> AppResult<ToolStatus> {
 
     let (download_url, file_name) = resolve_url_and_filename(&entry)?;
     let file_name = file_name.replace("{os}", os_token());
-    let dest = tdir.join(&file_name);
+
+    // Choose where to drop the downloaded archive. For most tools we
+    // write it into `tdir` and either keep it (single-file tools like
+    // apktool) or leave it lying around after extraction (jadx). For
+    // Java we extract straight into `tdir` *after* `remove_dir_all`
+    // clears it, so the archive must live somewhere else — otherwise
+    // `remove_dir_all(&tdir)` would delete the archive we just
+    // downloaded and the subsequent extract would fail with NotFound.
+    let java_staging: Option<PathBuf> = if entry.name == ToolName::Java
+        && entry.unzip_dir.is_none()
+    {
+        let s = dir.join(format!(
+            ".jadb-java-staging-{}",
+            uuid::Uuid::new_v4()
+        ));
+        fs::create_dir_all(&s).await?;
+        Some(s)
+    } else {
+        None
+    };
+    let dest = match &java_staging {
+        Some(stage) => stage.join(&file_name),
+        None => tdir.join(&file_name),
+    };
 
     download_with_progress(app, name.as_str(), &download_url, &dest).await?;
 
@@ -521,7 +713,37 @@ pub async fn install(app: &AppHandle, name: ToolName) -> AppResult<ToolStatus> {
             let unzip_name = unzip.replace("{os}", os_token());
             let unzip_into = tdir.join(&unzip_name);
             let _ = fs::remove_dir_all(&unzip_into).await;
-            extract_zip(&dest, &unzip_into).await?;
+            let name_lc = dest
+                .file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or("")
+                .to_ascii_lowercase();
+            if name_lc.ends_with(".tar.gz") || name_lc.ends_with(".tgz") {
+                extract_tar_gz(&dest, &unzip_into).await?;
+            } else {
+                extract_zip(&dest, &unzip_into).await?;
+            }
+        }
+        // Java has unzip_dir=null: extract straight into `tdir`. Pick
+        // the right extractor by archive extension. The archive was
+        // downloaded into `java_staging` (see above) so clearing
+        // `tdir` here is safe and leaves no stale JDK artefacts from a
+        // previous install.
+        if let Some(ref stage) = java_staging {
+            let _ = fs::remove_dir_all(&tdir).await;
+            fs::create_dir_all(&tdir).await?;
+            let name_lc = dest
+                .file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or("")
+                .to_ascii_lowercase();
+            if name_lc.ends_with(".tar.gz") || name_lc.ends_with(".tgz") {
+                extract_tar_gz(&dest, &tdir).await?;
+            } else {
+                extract_zip(&dest, &tdir).await?;
+            }
+            // Drop the staging dir (it holds the now-consumed archive).
+            let _ = fs::remove_dir_all(stage).await;
         }
         let bin = resolve_binary_path(&entry, &dir)?;
         // `jadx_dir` is the parent of `bin/` — both the CLI decompiler
@@ -533,6 +755,16 @@ pub async fn install(app: &AppHandle, name: ToolName) -> AppResult<ToolStatus> {
                 .and_then(|p| p.parent())
                 .map(|p| p.to_path_buf())
                 .unwrap_or(bin)
+        } else if entry.name == ToolName::Java {
+            // Settings.java_dir stores the install root (`<tdir>`) —
+            // the same shape every other tool uses — so the Tools UI
+            // shows a consistent ".../tools/java-21" path regardless
+            // of OS. The JDK home and `bin/java` are recomputed from
+            // this root at runtime by `java_runtime::probe_jdk_at`,
+            // which knows about both Adoptium layouts
+            // (`<root>/bin/java` on linux/windows,
+            // `<root>/Contents/Home/bin/java` on mac).
+            tdir.clone()
         } else {
             bin
         }
@@ -561,6 +793,10 @@ pub async fn install(app: &AppHandle, name: ToolName) -> AppResult<ToolStatus> {
         },
         ToolName::Adb => SettingsPatch {
             adb_path: Some(Some(final_path.to_string_lossy().into())),
+            ..Default::default()
+        },
+        ToolName::Java => SettingsPatch {
+            java_dir: Some(Some(final_path.to_string_lossy().into())),
             ..Default::default()
         },
     };
@@ -626,6 +862,10 @@ pub async fn remove(app: &AppHandle, name: ToolName) -> AppResult<()> {
         },
         ToolName::Adb => SettingsPatch {
             adb_path: Some(None),
+            ..Default::default()
+        },
+        ToolName::Java => SettingsPatch {
+            java_dir: Some(None),
             ..Default::default()
         },
     };

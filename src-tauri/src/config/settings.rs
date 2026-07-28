@@ -37,6 +37,11 @@ pub struct Settings {
     pub android_build_tools_dir: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub jadx_dir: Option<String>,
+    /// Path to the bundled JDK root directory (the parent of `bin/java`
+    /// on linux/windows, or `Contents/Home` on macOS). Set by the
+    /// tool installer after `Install` succeeds in Settings → Tools.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub java_dir: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rules_path: Option<String>,
     /// Optional remote URL pointing at a zip that contains LibChecker-style JSON rule files.
@@ -94,6 +99,8 @@ pub struct SettingsPatch {
     #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "double_option")]
     pub jadx_dir: Option<Option<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "double_option")]
+    pub java_dir: Option<Option<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "double_option")]
     pub rules_path: Option<Option<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "double_option")]
     pub rules_download_url: Option<Option<String>>,
@@ -112,6 +119,7 @@ impl Settings {
         if let Some(v) = patch.apksigner_path { self.apksigner_path = v; }
         if let Some(v) = patch.android_build_tools_dir { self.android_build_tools_dir = v; }
         if let Some(v) = patch.jadx_dir { self.jadx_dir = v; }
+        if let Some(v) = patch.java_dir { self.java_dir = v; }
         if let Some(v) = patch.rules_path { self.rules_path = v; }
         if let Some(v) = patch.rules_download_url { self.rules_download_url = v; }
         if let Some(v) = patch.language { self.language = v; }

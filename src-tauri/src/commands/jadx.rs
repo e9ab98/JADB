@@ -1,6 +1,7 @@
 use crate::config::settings;
 use crate::error::{AppError, AppResult};
 use crate::services::jadx_decompiler::{self, JadxOptions, TaskHandle};
+use crate::services::java_runtime;
 use crate::services::task_registry::TaskRegistry;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -137,6 +138,31 @@ pub async fn launch_jadx_gui(app: AppHandle) -> AppResult<()> {
         };
         cmd
     };
+    // Make sure the bundled (or system) Java is what the jadx-gui
+    // launcher script sees. Without these, on a host with no `java`
+    // in PATH the wrapper exits with "java: command not found"
+    // before even loading jadx-gui.jar. We:
+    //   1. set JAVA_HOME (read by the launcher and any JVM it spawns)
+    //   2. prepend <JAVA_HOME>/bin to PATH so any plain `java`
+    //      invocation (in the launcher, or in child tools) finds ours.
+    // If `java` cannot be resolved at all, fall back to the original
+    // behaviour and let the launcher report its own error — we do not
+    // want to block launching when the user has a known-good
+    // system-wide Java that just happens to elude our detector.
+    if let Ok(runtime) = java_runtime::resolve(&s, Some(&dir)) {
+        cmd.env("JAVA_HOME", &runtime.java_home);
+        let mut path = std::env::var_os("PATH").unwrap_or_default();
+        let bin_dir = runtime.java_home.join("bin");
+        if bin_dir.is_dir() {
+            let mut combined = std::ffi::OsString::from(bin_dir.as_os_str());
+            if !path.is_empty() {
+                combined.push(if cfg!(target_os = "windows") { ";" } else { ":" });
+                combined.push(path);
+            }
+            path = combined;
+            cmd.env("PATH", path);
+        }
+    }
     cmd.stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())

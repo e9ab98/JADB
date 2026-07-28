@@ -13,3 +13,4 @@ pub mod lineage_manager;
 pub mod signature_manager;
 pub mod task_registry;
 pub mod tool_manager;
+pub mod java_runtime;

@@ -1,4 +1,5 @@
 use crate::config::settings::Settings;
+use tauri::Manager;
 use crate::error::{AppError, AppResult};
 use crate::progress;
 use crate::services::apk_signer;
@@ -50,6 +51,11 @@ pub async fn repackage(
     let apktool_clone = apktool.clone();
     let app_clone = app.clone();
     let task_id_clone = task_id.clone();
+    let settings_clone = settings.clone();
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| AppError::Config(e.to_string()))?;
 
     tokio::spawn(async move {
         let mut cmd = Command::new(&apktool_clone);
@@ -156,6 +162,8 @@ pub async fn repackage(
                                 &sig,
                                 schemes,
                                 80.0,
+                                &settings_clone,
+                                &dir,
                             )
                             .await
                             {

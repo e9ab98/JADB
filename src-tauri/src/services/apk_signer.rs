@@ -5,11 +5,12 @@ use crate::progress;
 use crate::services::lineage_manager;
 use crate::services::signature_manager;
 use crate::services::task_registry::TaskRegistry;
+use crate::services::java_runtime;
 use crate::services::tool_manager::{self, BuildToolsPaths};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 
@@ -192,6 +193,8 @@ pub async fn run_signing(
     signature: &SignatureConfig,
     schemes: SigningSchemes,
     progress_base: f32,
+    settings: &Settings,
+    app_data_dir: &Path,
 ) -> AppResult<Option<SigningOutput>> {
     schemes.validate()?;
     let input = PathBuf::from(apk);
@@ -240,7 +243,8 @@ pub async fn run_signing(
 
     let sign_percent = progress_base + (100.0 - progress_base) * 0.45;
     progress::emit_progress(app, task_id, sign_percent, "APK 签名中");
-    let mut apksigner = Command::new("java");
+    let runtime = java_runtime::resolve(settings, Some(app_data_dir))?;
+    let mut apksigner = Command::new(&runtime.java_bin);
     apksigner
         .args(build_apksigner_args(
             &build_tools.apksigner_jar.to_string_lossy(),
@@ -381,6 +385,11 @@ pub async fn sign(
     let app_clone = app.clone();
     let task_id_clone = task_id.clone();
     let apk_owned = apk_path.to_string();
+    let settings_clone = settings.clone();
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| AppError::Config(e.to_string()))?;
 
     tokio::spawn(async move {
         match run_signing(
@@ -391,6 +400,8 @@ pub async fn sign(
             &signature,
             schemes,
             0.0,
+            &settings_clone,
+            &dir,
         )
         .await
         {
@@ -514,6 +525,8 @@ pub async fn run_rotation_signing(
     lineage_path: &str,
     v4_enabled: bool,
     progress_base: f32,
+    settings: &Settings,
+    app_data_dir: &Path,
 ) -> AppResult<Option<SigningOutput>> {
     if old_signature.id == new_signature.id {
         return Err(AppError::InvalidInput(
@@ -572,7 +585,8 @@ pub async fn run_rotation_signing(
 
     let sign_percent = progress_base + (100.0 - progress_base) * 0.45;
     progress::emit_progress(app, task_id, sign_percent, "APK 密钥轮换签名中");
-    let mut apksigner = Command::new("java");
+    let runtime = java_runtime::resolve(settings, Some(app_data_dir))?;
+    let mut apksigner = Command::new(&runtime.java_bin);
     apksigner
         .args(build_apksigner_rotation_args(
             &build_tools.apksigner_jar.to_string_lossy(),
@@ -653,6 +667,11 @@ pub async fn sign_rotation(
             "lineage 引用的旧/新签名相同".into(),
         ));
     }
+    let settings_clone = settings.clone();
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| AppError::Config(e.to_string()))?;
     let lineage_path = PathBuf::from(&lineage.lineage_path);
     if !lineage_path.is_file() {
         return Err(AppError::InvalidInput(format!(
@@ -678,6 +697,8 @@ pub async fn sign_rotation(
             &lineage_owned,
             v4_enabled,
             0.0,
+            &settings_clone,
+            &dir,
         )
         .await
         {
