@@ -66,7 +66,7 @@ pnpm tauri build
 - 仅 macOS(`.dmg`);Windows(`.msi`)在 v0.2
 - 仅英文 / 简体中文 UI
 - LibChecker 规则的 `manifest` 类型当前仅支持简单的 `contains` 字符串匹配;完整 XPath 子集待后续扩展
-- 自动更新(`tauri-plugin-updater`)暂未接入
+- 自动更新基于 Tauri Updater 与 GitHub Releases，发布前需配置签名密钥
 - Logo 是占位字母 "J",后续替换
 
 ## 项目结构

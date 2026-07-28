@@ -45,9 +45,9 @@
   "plugins": {
     "updater": {
       "endpoints": [
-        "https://github.com/gaoxin/jadb/releases/latest/download/latest.json"
+        "https://github.com/e9ab98/JADB/releases/latest/download/latest.json"
       ],
-      "pubkey": "REPLACE_WITH_TAURI_UPDATER_PUBLIC_KEY",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDkyQUYyQUIyN0I4MUI5NjEKUldSaHVZRjdzaXF2a25Cb0I1MHNqL3RRdlkxbGErQ1pkVlNQV1dhbndTU2pGWEN5enk3U3dtdDkK",
       "windows": {
         "installMode": "passive"
       }
