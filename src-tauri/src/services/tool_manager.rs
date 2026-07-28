@@ -487,6 +487,11 @@ fn ensure_executable(path: &Path) -> AppResult<()> {
         permissions.set_mode(permissions.mode() | 0o755);
         std::fs::set_permissions(path, permissions)?;
     }
+    // On non-unix (Windows) executables don't have a separate execute bit;
+    // extension association handles launch, so this is a no-op. Silence
+    // the unused-variable lint that triggers here.
+    #[cfg(not(unix))]
+    let _ = path;
     Ok(())
 }
 

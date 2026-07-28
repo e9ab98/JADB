@@ -132,7 +132,13 @@ fn walk_recursive(
                 .to_path_buf();
             out.push(CacheFileEntry {
                 category: category.to_string(),
-                path: rel.to_string_lossy().into_owned(),
+                // Always emit forward slashes on the wire, regardless of host OS.
+                // The frontend joins these with the category root using PathBuf,
+                // which handles either separator, but the test suite and the
+                // diagnostic UI compare against literal `"sub/foo.bin"` strings
+                // which would break on Windows where PathBuf -> String gives
+                // `"sub\\foo.bin"`.
+                path: rel.to_string_lossy().into_owned().replace('\\', "/"),
                 bytes,
             });
             *total += bytes;

@@ -1480,10 +1480,14 @@ mod tests {
 
     #[test]
     fn discovers_custom_webp_icon_entries() {
+        // Use UUID instead of the OS thread name: on Windows, the test
+        // framework's thread names contain `::` (module-path separators)
+        // which is an invalid character in NTFS filenames and produces
+        // `Os { code: 123, InvalidFilename }` at File::create.
         let path = std::env::temp_dir().join(format!(
             "jadb-icon-fixture-{}-{}.apk",
             std::process::id(),
-            std::thread::current().name().unwrap_or("test")
+            uuid::Uuid::new_v4()
         ));
         let file = std::fs::File::create(&path).unwrap();
         let mut archive = zip::ZipWriter::new(file);
