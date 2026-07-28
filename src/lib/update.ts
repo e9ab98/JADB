@@ -6,8 +6,8 @@ const LAST_CHECK_KEY = 'jadb-update-last-check';
 
 export type UpdateInfo = {
   version: string;
-  notes?: string;
-  pubDate?: string;
+  notes?: string | undefined;
+  pubDate?: string | undefined;
 };
 
 let currentUpdate: Update | null = null;

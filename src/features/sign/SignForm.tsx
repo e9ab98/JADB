@@ -248,6 +248,10 @@ export function SignForm({ onStarted }: Props) {
 
   async function confirmRisk() {
     if (busy || !pendingRisk) return;
+    // runStandard() requires a StandardRequest (not RotationRequest);
+    // rotation requests have their own path and never reach confirmRisk,
+    // but TS can't see that so we narrow explicitly here.
+    if (pendingRisk.kind !== 'standard') return;
     setBusy(true);
     try {
       await runStandard(pendingRisk, false);

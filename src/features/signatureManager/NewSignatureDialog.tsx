@@ -140,7 +140,10 @@ export function NewSignatureDialog({ open, onOpenChange, onSubmit }: Props) {
                   const next = e.target.value as (typeof KEY_ALGORITHM_OPTIONS)[number];
                   setKeyAlgorithm(next);
                   const allowed = KEY_SIZE_OPTIONS[next];
-                  if (!allowed.includes(keySize)) setKeySize(allowed[0]);
+                  // noUncheckedIndexedAccess makes allowed[0] `number | undefined`.
+                  // Fall back to 2048 (the same default useState is seeded with)
+                  // if the algorithm has no permitted sizes (defensive; shouldn't happen).
+                  if (!allowed.includes(keySize)) setKeySize(allowed[0] ?? 2048);
                 }}
                 className="h-9 rounded-md border border-border bg-bg-1 px-2 text-sm text-text-0"
               >

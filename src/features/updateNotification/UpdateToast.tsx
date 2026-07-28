@@ -4,7 +4,7 @@ import { toast } from 'sonner';
 import { downloadAndInstall } from '@/lib/update';
 import { Button } from '@/components/ui/button';
 
-type Props = { version: string; notes?: string };
+type Props = { version: string; notes?: string | undefined };
 type Phase = 'idle' | 'downloading' | 'ready' | 'error';
 
 export function UpdateToast({ version, notes }: Props) {

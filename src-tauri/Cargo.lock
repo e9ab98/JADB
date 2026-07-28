@@ -1844,7 +1844,7 @@ checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
 
 [[package]]
 name = "jadb"
-version = "0.1.7"
+version = "0.1.9"
 dependencies = [
  "chrono",
  "flate2",

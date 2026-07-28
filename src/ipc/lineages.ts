@@ -2,6 +2,10 @@ import { invoke } from '@tauri-apps/api/core';
 import { save as saveDialog } from '@tauri-apps/plugin-dialog';
 import type { LineageConfig, LineageStatus } from '@/types/lineage';
 
+// Re-export so UI code can read the status shape through the IPC module
+// without having to import from @/types/lineage directly.
+export type { LineageStatus, LineageConfig };
+
 export async function listLineages(): Promise<LineageStatus[]> {
   return invoke<LineageStatus[]>('list_lineages');
 }
