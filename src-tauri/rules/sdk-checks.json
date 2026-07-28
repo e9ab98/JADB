@@ -1,0 +1,22 @@
+{
+  "id": "sdk-checks",
+  "name": "SDK Checks",
+  "version": "1.0.0",
+  "description": "Targets SDK version recommendations from Play Store policy.",
+  "rules": [
+    {
+      "id": "target-sdk-too-old",
+      "description": "targetSdkVersion below 34 — Play Store requires 34+ for new apps",
+      "severity": "danger",
+      "kind": "sdk",
+      "match": { "field": "target_sdk", "lt": "34" }
+    },
+    {
+      "id": "min-sdk-acceptable",
+      "description": "minSdkVersion is 24+ (acceptable)",
+      "severity": "info",
+      "kind": "sdk",
+      "match": { "field": "min_sdk", "lt": "21" }
+    }
+  ]
+}

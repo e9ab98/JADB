@@ -1,0 +1,31 @@
+use jadb_lib::services::apk_signer::build_uber_args;
+
+#[test]
+fn builds_args_with_passwords() {
+    let args = build_uber_args(
+        "/path/uber.jar",
+        "/tmp/in.apk",
+        "/tmp/ks.jks",
+        "storepwd",
+        "alias",
+        "keypwd",
+    );
+    assert_eq!(
+        args,
+        vec![
+            "-jar", "/path/uber.jar",
+            "--apks", "/tmp/in.apk",
+            "--ks", "/tmp/ks.jks",
+            "--ksPass", "storepwd",
+            "--ksKeyAlias", "alias",
+            "--keyPass", "keypwd",
+        ]
+    );
+}
+
+#[test]
+fn uber_jar_is_first_arg() {
+    let args = build_uber_args("u.jar", "a.apk", "k.jks", "p", "al", "kp");
+    assert_eq!(args[1], "u.jar");
+    assert_eq!(args[args.len() - 1], "kp");
+}

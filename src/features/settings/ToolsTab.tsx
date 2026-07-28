@@ -1,0 +1,467 @@
+import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import { toast } from 'sonner';
+import { Check, Download, FolderInput, Trash2, X } from 'lucide-react';
+import { open as openDialog } from '@tauri-apps/plugin-dialog';
+import { useToolsStore } from '@/store/tools';
+import { useSettingsStore } from '@/store/settings';
+import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { formatBytes } from '@/lib/utils';
+import type { ToolName } from '@/ipc/tools';
+import type { ToolStatus, ToolSource } from '@/ipc/tools';
+import type { SettingsPatch } from '@/ipc/useTauri';
+import {
+  getRulePackStatus,
+  installRulePacks,
+  uninstallRulePacks,
+  installLibcheckerRules,
+  type RulePackStatus,
+} from '@/ipc/rules';
+
+const DESCRIPTIONS: Record<ToolName, { label: string; desc: string }> = {
+  apktool: { label: 'apktool', desc: 'APK 反编译 / 重打包' },
+  'uber-apk-signer': { label: 'uber-apk-signer', desc: 'APK 签名 (V2 / V3 / V4)' },
+  'android-build-tools': {
+    label: 'Android Build-Tools',
+    desc: 'APK 对齐与签名 (zipalign + apksigner)',
+  },
+  jadx: { label: 'jadx', desc: 'Java 源码反编译' },
+  aapt2: { label: 'aapt2', desc: 'APK 信息分析 (badging)' },
+  adb: { label: 'adb', desc: 'Android Debug Bridge (设备通信 / pull / push)' },
+};
+
+/// Map a tool name to its `SettingsPatch` field. Centralised so we don't
+/// silently typo one of the camelCase keys.
+function settingsKeyForTool(name: ToolName): keyof SettingsPatch {
+  switch (name) {
+    case 'adb':
+      return 'adbPath';
+    case 'apktool':
+      return 'apktoolPath';
+    case 'aapt2':
+      return 'aaptPath';
+    case 'jadx':
+      return 'jadxDir';
+    case 'uber-apk-signer':
+      return 'uberApkSignerPath';
+    case 'android-build-tools':
+      return 'androidBuildToolsDir';
+  }
+}
+
+function RulesPackCard() {
+  const { t } = useTranslation();
+  const [status, setStatus] = useState<RulePackStatus | null>(null);
+  const [busy, setBusy] = useState(false);
+  const downloadUrl = useSettingsStore((s) => s.settings?.rulesDownloadUrl ?? null);
+  const rulesPath = useSettingsStore((s) => s.settings?.rulesPath ?? null);
+  const patch = useSettingsStore((s) => s.patch);
+  const refresh = useSettingsStore((s) => s.refresh);
+
+  useEffect(() => {
+    void getRulePackStatus().then(setStatus).catch(() => setStatus(null));
+  }, []);
+
+  async function install() {
+    setBusy(true);
+    try {
+      const s = await installRulePacks();
+      setStatus(s);
+      await refresh();
+      if (s.source === 'server') {
+        toast.success(t('settings.rulePackInstalledServer'));
+      } else {
+        toast.warning(
+          t('settings.rulePackInstalledBundledFallback', {
+            reason: s.lastError ?? 'n/a',
+          }),
+        );
+      }
+    } catch (e) {
+      toast.error(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function uninstall() {
+    setBusy(true);
+    try {
+      await uninstallRulePacks();
+      const s = await getRulePackStatus();
+      setStatus(s);
+      await refresh();
+      toast.success(t('settings.rulePackUninstalled'));
+    } catch (e) {
+      toast.error(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function installLibchecker() {
+    setBusy(true);
+    try {
+      const s = await installLibcheckerRules();
+      setStatus(s);
+      await refresh();
+      // Whenever the backend reports a fallback reason it means the
+      // user only got the bundled starter instead of the real
+      // LibChecker rule set. Surface that prominently so they know
+      // that the 2-rule 7-rules count they see in RulesPackCard is
+      // not the real LibChecker data.
+      if (s.lastError) {
+        toast.warning(
+          t('settings.rulePackInstalledLibcheckerFallback', {
+            reason: s.lastError,
+          }),
+        );
+      } else {
+        toast.success(t('settings.rulePackInstalledLibchecker'));
+      }
+    } catch (e) {
+      toast.error(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center justify-between">
+          <span>{t('settings.rulePackCardTitle')}</span>
+          {status?.installed ? <Check className="h-4 w-4 text-success" /> : null}
+        </CardTitle>
+        <CardDescription>{t('settings.rulePackCardDesc')}</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {status?.lastError && (
+          // Persistent inline warning so the fallback reason stays
+          // visible after the toast disappears (e.g. user navigated
+          // away, came back). Mirrors the layout already used for
+          // rulePackPathMismatch a few lines below.
+          <div className="rounded-md border border-warning bg-bg-1 p-2 text-xs text-warning">
+            <div className="font-semibold">
+              {t('settings.rulePackFallbackTitle')}
+            </div>
+            <div className="mt-1 font-mono break-all">{status.lastError}</div>
+          </div>
+        )}
+        <div className="text-xs text-text-2 break-all">
+          {status?.installed ? (
+            <>
+              <div className="font-mono">{status.path}</div>
+              <div className="mt-1">
+                {status.packs.length} {t('settings.rulePackPacks')},{' '}
+                {status.total_rules} {t('settings.rulePackRules')}
+                {status.source && (
+                  <span className="ml-2 text-text-2">
+                    ·{' '}
+                    {status.source === 'server'
+                      ? t('settings.rulePackSourceServer')
+                      : t('settings.rulePackSourceBundled')}
+                  </span>
+                )}
+              </div>
+              {rulesPath && status.path && rulesPath !== status.path && (
+                <div className="mt-2 rounded-md border border-warning bg-bg-1 p-2 text-xs text-warning">
+                  {t('settings.rulePackPathMismatch', { current: rulesPath })}
+                </div>
+              )}
+            </>
+          ) : (
+            <span>{t('settings.rulePackEmpty')}</span>
+          )}
+        </div>
+        <div className="space-y-1">
+          <label className="block text-xs font-medium text-text-1">
+            {t('settings.rulePackUrlLabel')}
+          </label>
+          <input
+            type="url"
+            value={downloadUrl ?? ''}
+            placeholder="https://example.com/rules.zip"
+            onChange={(e) =>
+              void patch({ rulesDownloadUrl: e.target.value || null })
+            }
+            className="h-9 w-full rounded-md border border-border bg-bg-1 px-3 text-sm text-text-0 placeholder:text-text-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+          />
+          <p className="text-xs text-text-2">
+            {t('settings.rulePackUrlHint')}
+          </p>
+        </div>
+        <div className="flex gap-2">
+          {!status?.installed ? (
+            <>
+              <Button disabled={busy} onClick={() => void install()}>
+                <Download className="h-4 w-4" />
+                {busy ? t('settings.toolsBusy') : t('settings.rulePackInstall')}
+              </Button>
+              <Button variant="outline" disabled={busy} onClick={() => void installLibchecker()}>
+                <Download className="h-4 w-4" />
+                {busy ? t('settings.toolsBusy') : t('settings.rulePackInstallLibchecker')}
+              </Button>
+            </>
+          ) : (
+            <>
+              <Button onClick={() => void install()} disabled={busy}>
+                <Download className="h-4 w-4" />
+                {busy ? t('settings.toolsBusy') : t('settings.rulePackRefresh')}
+              </Button>
+              <Button variant="outline" disabled={busy} onClick={() => void installLibchecker()}>
+                <Download className="h-4 w-4" />
+                {busy ? t('settings.toolsBusy') : t('settings.rulePackInstallLibchecker')}
+              </Button>
+              <Button variant="outline" disabled={busy} onClick={() => void uninstall()}>
+                <Trash2 className="h-4 w-4" />
+                {t('settings.rulePackUninstall')}
+              </Button>
+            </>
+          )}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function SourceBadge({ source }: { source: ToolSource }) {
+  const { t } = useTranslation();
+  const meta: Record<ToolSource, { variant: 'secondary' | 'success' | 'outline'; label: string }> = {
+    bundled: { variant: 'secondary', label: t('settings.toolSourceBundled') },
+    local: { variant: 'success', label: t('settings.toolSourceLocal') },
+    fallback: { variant: 'outline', label: t('settings.toolSourceFallback') },
+  };
+  const m = meta[source];
+  return <Badge variant={m.variant}>{m.label}</Badge>;
+}
+
+export function ToolsTab() {
+  const { t } = useTranslation();
+  const tools = useToolsStore((s) => s.tools);
+  const refresh = useToolsStore((s) => s.refresh);
+  const install = useToolsStore((s) => s.install);
+  const remove = useToolsStore((s) => s.remove);
+  const busy = useToolsStore((s) => s.busy);
+  const progress = useToolsStore((s) => s.progress);
+  const error = useToolsStore((s) => s.error);
+  const patchSettings = useSettingsStore((s) => s.patch);
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
+  /// Pick a local binary for `name` and write it to Settings.<tool>_path.
+  async function pickLocal(name: ToolName) {
+    const picked = await openDialog({
+      multiple: false,
+      directory: name === 'jadx' || name === 'android-build-tools',
+      title: t('settings.toolUseLocalTitle', { tool: name }),
+    });
+    if (typeof picked !== 'string') return;
+    const path = picked;
+    const key = settingsKeyForTool(name);
+    try {
+      // Build a properly-typed patch object. SettingsPatch has only
+      // camelCase fields, so we have to switch on the tool name.
+      const patch: SettingsPatch = {};
+      switch (name) {
+        case 'adb':
+          patch.adbPath = path;
+          break;
+        case 'aapt2':
+          patch.aaptPath = path;
+          break;
+        case 'apktool':
+          patch.apktoolPath = path;
+          break;
+        case 'uber-apk-signer':
+          patch.uberApkSignerPath = path;
+          break;
+        case 'android-build-tools':
+          patch.androidBuildToolsDir = path;
+          break;
+        case 'jadx':
+          patch.jadxDir = path;
+          break;
+      }
+      await patchSettings(patch);
+      // suppress unused-var lint for `key` — kept for clarity / debugging.
+      void key;
+      await refresh();
+      toast.success(t('settings.toolUseLocalSet', { path }));
+    } catch (e) {
+      toast.error(String(e));
+    }
+  }
+
+  /// Clear the user-supplied local path so the tool falls back to either
+  /// the bundled install or the not-installed state.
+  async function clearLocal(name: ToolName) {
+    try {
+      const patch: SettingsPatch = {};
+      switch (name) {
+        case 'adb':
+          patch.adbPath = null;
+          break;
+        case 'aapt2':
+          patch.aaptPath = null;
+          break;
+        case 'apktool':
+          patch.apktoolPath = null;
+          break;
+        case 'uber-apk-signer':
+          patch.uberApkSignerPath = null;
+          break;
+        case 'android-build-tools':
+          patch.androidBuildToolsDir = null;
+          break;
+        case 'jadx':
+          patch.jadxDir = null;
+          break;
+      }
+      await patchSettings(patch);
+      await refresh();
+      toast.success(t('settings.toolClearLocalDone'));
+    } catch (e) {
+      toast.error(String(e));
+    }
+  }
+
+  return (
+    <div className="space-y-4">
+      {error && (
+        <div className="rounded-md border border-danger bg-bg-1 p-3 text-sm text-danger">{error}</div>
+      )}
+      <RulesPackCard />
+      <div className="grid gap-4 sm:grid-cols-2">
+        {tools.map((tool) => {
+          const meta = DESCRIPTIONS[tool.name as ToolName] ?? { label: tool.name, desc: '' };
+          const pct = progress[tool.name];
+          const isBusy = busy === tool.name;
+          const hasBundled = tool.source === 'bundled';
+          const isLocal = tool.source === 'local';
+          return (
+            <ToolCard
+              key={tool.name}
+              tool={tool}
+              meta={meta}
+              pct={pct}
+              isBusy={isBusy}
+              hasBundled={hasBundled}
+              isLocal={isLocal}
+              onInstall={() => void install(tool.name as ToolName)}
+              onRemove={() => void remove(tool.name as ToolName)}
+              onPickLocal={() => void pickLocal(tool.name as ToolName)}
+              onClearLocal={() => void clearLocal(tool.name as ToolName)}
+            />
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+type ToolCardProps = {
+  tool: ToolStatus;
+  meta: { label: string; desc: string };
+  pct: { downloaded: number; total: number } | undefined;
+  isBusy: boolean;
+  hasBundled: boolean;
+  isLocal: boolean;
+  onInstall: () => void;
+  onRemove: () => void;
+  onPickLocal: () => void;
+  onClearLocal: () => void;
+};
+
+function ToolCard({
+  tool,
+  meta,
+  pct,
+  isBusy,
+  hasBundled,
+  isLocal,
+  onInstall,
+  onRemove,
+  onPickLocal,
+  onClearLocal,
+}: ToolCardProps) {
+  const { t } = useTranslation();
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center justify-between">
+          <span>{meta.label}</span>
+          {tool.installed ? <Check className="h-4 w-4 text-success" /> : null}
+        </CardTitle>
+        <CardDescription>{meta.desc}</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <div className="space-y-1 text-xs text-text-2 break-all">
+          <div className="flex items-center gap-2">
+            <SourceBadge source={tool.source} />
+            {tool.installed ? (
+              <span className="font-mono text-text-1">{tool.path ?? '—'}</span>
+            ) : (
+              <span className="text-text-2">
+                {tool.downloadUrl ?? t('settings.toolNotInstalled')}
+              </span>
+            )}
+          </div>
+        </div>
+        {pct && pct.total > 0 && (
+          <div className="space-y-1">
+            <div className="h-1.5 w-full overflow-hidden rounded-full bg-bg-2">
+              <div
+                className="h-full bg-brand transition-all"
+                style={{ width: `${Math.min(100, (pct.downloaded / pct.total) * 100)}%` }}
+              />
+            </div>
+            <div className="text-xs text-text-2">
+              {formatBytes(pct.downloaded)} / {formatBytes(pct.total)}
+            </div>
+          </div>
+        )}
+        <div className="flex flex-wrap gap-2">
+          {/* Bundled: download / re-download. Suppressed when the user is
+              actively pointing at a local binary — bundling would silently
+              overwrite their path. */}
+          {!isLocal && (
+            <Button disabled={isBusy} onClick={onInstall}>
+              <Download className="h-4 w-4" />
+              {isBusy
+                ? t('settings.toolsBusy')
+                : hasBundled
+                ? t('settings.toolInstallRe')
+                : t('settings.toolInstall')}
+            </Button>
+          )}
+          {hasBundled && (
+            <Button
+              variant="outline"
+              disabled={isBusy}
+              onClick={onRemove}
+              title={t('settings.toolRemoveBundledHint')}
+            >
+              <Trash2 className="h-4 w-4" />
+              {isBusy ? t('settings.toolsBusy') : t('settings.toolRemoveBundled')}
+            </Button>
+          )}
+          <Button variant="outline" disabled={isBusy} onClick={onPickLocal}>
+            <FolderInput className="h-4 w-4" />
+            {isLocal ? t('settings.toolUseLocalChange') : t('settings.toolUseLocal')}
+          </Button>
+          {isLocal && (
+            <Button variant="ghost" disabled={isBusy} onClick={onClearLocal}>
+              <X className="h-4 w-4" />
+              {t('settings.toolClearLocal')}
+            </Button>
+          )}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}

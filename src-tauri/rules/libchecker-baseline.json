@@ -1,0 +1,43 @@
+{
+  "id": "libchecker-baseline",
+  "name": "LibChecker Baseline",
+  "version": "1.0.0",
+  "description": "Starter rule pack shipped with JADB. Covers the most common reverse-engineering red flags.",
+  "rules": [
+    {
+      "id": "uses-internet",
+      "description": "App declares INTERNET permission",
+      "severity": "info",
+      "kind": "permission",
+      "match": { "pattern": "*INTERNET*" }
+    },
+    {
+      "id": "legacy-min-sdk",
+      "description": "minSdkVersion is below 26 (Android 8.0)",
+      "severity": "warn",
+      "kind": "sdk",
+      "match": { "field": "min_sdk", "lt": "26" }
+    },
+    {
+      "id": "many-activities",
+      "description": "App declares more than 10 activities (potential bloat)",
+      "severity": "info",
+      "kind": "component",
+      "match": { "type": "activity", "min_count": 10 }
+    },
+    {
+      "id": "dangerous-location",
+      "description": "App requests fine or coarse location",
+      "severity": "warn",
+      "kind": "permission",
+      "match": { "pattern": "*LOCATION*" }
+    },
+    {
+      "id": "read-contacts",
+      "description": "App requests READ_CONTACTS",
+      "severity": "danger",
+      "kind": "permission",
+      "match": { "pattern": "*READ_CONTACTS*" }
+    }
+  ]
+}

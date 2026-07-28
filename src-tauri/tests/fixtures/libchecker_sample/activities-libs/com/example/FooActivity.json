@@ -1,0 +1,14 @@
+{
+    "data": [
+        {
+            "locale": "en",
+            "data": {
+                "label": "FooActivity",
+                "dev_team": "Acme",
+                "description": "Demo activity class.",
+                "source_link": "https://example.com/foo"
+            }
+        }
+    ],
+    "uuid": "BBBBBBBB-0000-0000-0000-000000000001"
+}

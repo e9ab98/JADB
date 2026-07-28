@@ -1,0 +1,14 @@
+{
+    "data": [
+        {
+            "locale": "en",
+            "data": {
+                "label": "FooReceiver",
+                "dev_team": "Acme",
+                "description": "Demo receiver.",
+                "source_link": "https://example.com/rec"
+            }
+        }
+    ],
+    "uuid": "DDDDDDDD-0000-0000-0000-000000000001"
+}

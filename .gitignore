@@ -1,0 +1,53 @@
+# Build outputs
+node_modules/
+src-tauri/target/
+dist/
+build/
+.pnpm-store/
+dist/
+.cargo-cache/
+# TypeScript build artifacts (tsc -b emits .js next to .ts when no noEmit).
+# src/**/*.ts is source; src/**/*.js is tsc output and should never be tracked.
+src/**/*.js
+src/**/*.js.map
+*.tsbuildinfo
+.pnpm-store/
+# Brainstorming & local working files
+.superpowers/
+docs/
+
+# Specs ARE tracked (intentional whitelist)
+!.gitignore
+!docs/superpowers/
+!docs/superpowers/specs/
+!docs/superpowers/specs/**
+
+# Daily review output is tracked (intentional whitelist)
+!docs/superpowers/daily/
+!docs/superpowers/daily/**
+
+# OS noise
+.DS_Store
+Thumbs.db
+*.swp
+
+# Editor
+.idea/
+.vscode/
+*.iml
+
+# Local env
+.env
+.env.local
+*.log
+.npmrc
+logo_square.png
+__pycache__/
+
+# Daily-review automation runtime config (path is machine-local)
+scripts/.daily-review.env
+/scripts/install-daily-review-launchd.sh
+/scripts/README.daily-review.md
+/scripts/uninstall-daily-review-launchd.sh
+/scripts/run-daily-review.sh
+/docs/superpowers/specs/

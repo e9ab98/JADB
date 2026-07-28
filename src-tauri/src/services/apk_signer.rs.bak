@@ -1,0 +1,190 @@
+use crate::commands::signatures::SignatureConfig;
+use crate::config::settings::Settings;
+use crate::error::{AppError, AppResult};
+use crate::progress;
+use crate::services::signature_manager;
+use crate::services::task_registry::TaskRegistry;
+use serde::Serialize;
+use std::process::Stdio;
+use tauri::AppHandle;
+use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::process::Command;
+
+#[derive(Serialize, Clone, Debug)]
+pub struct TaskHandle {
+    pub task_id: String,
+    pub kind: String,
+}
+
+pub fn build_uber_args(
+    uber: &str,
+    apk: &str,
+    ks: &str,
+    ks_pass: &str,
+    alias: &str,
+    key_pass: &str,
+) -> Vec<String> {
+    vec![
+        "-jar".into(),
+        uber.into(),
+        "--apks".into(),
+        apk.into(),
+        "--ks".into(),
+        ks.into(),
+        "--ksPass".into(),
+        ks_pass.into(),
+        "--ksKeyAlias".into(),
+        alias.into(),
+        "--keyPass".into(),
+        key_pass.into(),
+    ]
+}
+
+/// Run the signer under `task_id`, streaming events. Blocks until done.
+/// Returns `Ok(true)` on success, `Ok(false)` if java process failed.
+pub async fn run_signing(
+    app: &AppHandle,
+    task_id: &str,
+    uber: &str,
+    apk: &str,
+    sig: &SignatureConfig,
+) -> AppResult<bool> {
+    let mut cmd = Command::new("java");
+    cmd.args(build_uber_args(
+        uber,
+        apk,
+        &sig.keystore_path,
+        &sig.keystore_password,
+        &sig.key_alias,
+        &sig.key_password,
+    ))
+    .stdout(Stdio::piped())
+    .stderr(Stdio::piped())
+    .kill_on_drop(true);
+
+    let mut child = match cmd.spawn() {
+        Ok(c) => c,
+        Err(e) => {
+            progress::emit_error(app, task_id, &format!("spawn java: {e}"));
+            return Ok(false);
+        }
+    };
+
+    let stdout = match child.stdout.take() {
+        Some(s) => s,
+        None => {
+            progress::emit_error(app, task_id, "java stdout unavailable");
+            return Ok(false);
+        }
+    };
+    let stderr = match child.stderr.take() {
+        Some(s) => s,
+        None => {
+            progress::emit_error(app, task_id, "java stderr unavailable");
+            return Ok(false);
+        }
+    };
+
+    let mut out_reader = BufReader::new(stdout).lines();
+    let mut err_reader = BufReader::new(stderr).lines();
+
+    let mut exited = false;
+    let mut stdout_done = false;
+    let mut stderr_done = false;
+    let mut success = false;
+
+    while !(stdout_done && stderr_done && exited) {
+        tokio::select! {
+            line = out_reader.next_line(), if !stdout_done => match line {
+                Ok(Some(l)) => progress::emit_log(app, task_id, &l, "info"),
+                Ok(None) => stdout_done = true,
+                Err(e) => {
+                    progress::emit_log(app, task_id, &format!("stdout err: {e}"), "warn");
+                    stdout_done = true;
+                }
+            },
+            line = err_reader.next_line(), if !stderr_done => match line {
+                Ok(Some(l)) => {
+                    let level = if l.to_lowercase().contains("error") { "error" } else { "warn" };
+                    progress::emit_log(app, task_id, &l, level);
+                }
+                Ok(None) => stderr_done = true,
+                Err(e) => {
+                    progress::emit_log(app, task_id, &format!("stderr err: {e}"), "warn");
+                    stderr_done = true;
+                }
+            },
+            status = child.wait(), if !exited => match status {
+                Ok(s) => {
+                    success = s.success();
+                    exited = true;
+                }
+                Err(e) => {
+                    progress::emit_error(app, task_id, &format!("wait failed: {e}"));
+                    exited = true;
+                }
+            },
+        }
+    }
+
+    if success {
+        progress::emit_progress(app, task_id, 100.0, "完成");
+    } else {
+        progress::emit_error(app, task_id, "uber-apk-signer 退出失败");
+    }
+    Ok(success)
+}
+
+/// Standalone entry point — registers a fresh task_id, returns TaskHandle.
+pub async fn sign(
+    app: &AppHandle,
+    registry: &TaskRegistry,
+    settings: &Settings,
+    apk_path: &str,
+    signature_id: &str,
+) -> AppResult<TaskHandle> {
+    let uber = settings
+        .uber_apk_signer_path
+        .clone()
+        .ok_or_else(|| AppError::ToolMissing("uber-apk-signer".into()))?;
+    let sig = signature_manager::find(app, signature_id)
+        .await?
+        .ok_or_else(|| AppError::NotFound(format!("signature {signature_id}")))?;
+
+    let task_id = uuid::Uuid::new_v4().to_string();
+    let _ = registry.register(&task_id);
+
+    let app_clone = app.clone();
+    let task_id_clone = task_id.clone();
+    let apk_owned = apk_path.to_string();
+
+    tokio::spawn(async move {
+        progress::emit_progress(&app_clone, &task_id_clone, 0.0, "签名中");
+        match run_signing(&app_clone, &task_id_clone, &uber, &apk_owned, &sig).await {
+            Ok(true) => {
+                // Detect output: uber-apk-signer writes <apk>.signed (or in same dir under "-aligned-signed.apk").
+                let signed = format_apk_signed_path(&apk_owned);
+                progress::emit_done(&app_clone, &task_id_clone, Some(signed.as_str()));
+            }
+            _ => {
+                // error already emitted inside run_signing
+            }
+        }
+    });
+
+    Ok(TaskHandle {
+        task_id,
+        kind: "sign".into(),
+    })
+}
+
+/// Given an input APK path, compute the path that uber-apk-signer would produce.
+/// uber-apk-signer creates `<input>-aligned-debugSigned.apk` in the same dir as the input.
+/// For simplicity we predict the primary `-aligned-debugSigned.apk` form.
+pub fn format_apk_signed_path(apk: &str) -> String {
+    let p = std::path::Path::new(apk);
+    let stem = p.file_stem().and_then(|s| s.to_str()).unwrap_or("output");
+    let parent = p.parent().and_then(|p| p.to_str()).unwrap_or(".");
+    let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("apk");
+    format!("{}/{}-aligned-debugSigned.{}", parent.trim_end_matches('/'), stem, ext)
+}

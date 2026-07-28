@@ -1,0 +1,14 @@
+{
+    "data": [
+        {
+            "locale": "en",
+            "data": {
+                "label": "Trichrome",
+                "dev_team": "Google",
+                "description": "Shared Trichrome library.",
+                "source_link": "https://chromium.googlesource.com/"
+            }
+        }
+    ],
+    "uuid": "11111111-0000-0000-0000-000000000001"
+}

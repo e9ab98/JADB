@@ -1,0 +1,14 @@
+{
+    "data": [
+        {
+            "locale": "en",
+            "data": {
+                "label": "Demo Action",
+                "dev_team": "Acme",
+                "description": "Demo intent action.",
+                "source_link": "https://example.com/act"
+            }
+        }
+    ],
+    "uuid": "FFFFFFFF-0000-0000-0000-000000000001"
+}

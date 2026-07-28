@@ -1,0 +1,14 @@
+{
+    "data": [
+        {
+            "locale": "en",
+            "data": {
+                "label": "FooService",
+                "dev_team": "Acme",
+                "description": "Demo service.",
+                "source_link": "https://example.com/svc"
+            }
+        }
+    ],
+    "uuid": "CCCCCCCC-0000-0000-0000-000000000001"
+}

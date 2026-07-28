@@ -1,0 +1,14 @@
+{
+    "data": [
+        {
+            "locale": "en",
+            "data": {
+                "label": "OtherNative",
+                "dev_team": "Beta",
+                "description": "Second native library.",
+                "source_link": "https://example.com/other"
+            }
+        }
+    ],
+    "uuid": "AAAAAAAA-0000-0000-0000-000000000002"
+}

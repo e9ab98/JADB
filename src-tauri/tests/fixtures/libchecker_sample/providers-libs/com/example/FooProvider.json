@@ -1,0 +1,14 @@
+{
+    "data": [
+        {
+            "locale": "en",
+            "data": {
+                "label": "FooProvider",
+                "dev_team": "Acme",
+                "description": "Demo provider.",
+                "source_link": "https://example.com/prv"
+            }
+        }
+    ],
+    "uuid": "EEEEEEEE-0000-0000-0000-000000000001"
+}

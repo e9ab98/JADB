@@ -1,0 +1,23 @@
+{
+    "data": [
+        {
+            "locale": "en",
+            "data": {
+                "label": "TestNative",
+                "dev_team": "Acme",
+                "description": "Native test library used in fixtures.",
+                "source_link": "https://example.com/test"
+            }
+        },
+        {
+            "locale": "zh-Hans",
+            "data": {
+                "label": "TestNative",
+                "dev_team": "Acme",
+                "description": "测试用原生库。",
+                "source_link": "https://example.com/test"
+            }
+        }
+    ],
+    "uuid": "AAAAAAAA-0000-0000-0000-000000000001"
+}
