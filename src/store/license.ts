@@ -42,7 +42,9 @@ export const useLicenseStore = create<LicenseStore>((set, get) => ({
   },
   hasFeature(feature) {
     const status = get().status;
-    return status?.state === 'active' && status.features.includes(feature);
+    if (status?.state !== 'active') return false;
+    if (status.features.includes('all')) return true;
+    return status.features.includes(feature);
   },
   requireFeature(feature) {
     if (get().hasFeature(feature)) return true;

@@ -9,9 +9,11 @@ use tauri::{AppHandle, Manager};
 use tokio::fs;
 use uuid::Uuid;
 
+pub const FEATURE_ALL: &str = "all";
 pub const FEATURE_REPORT_EXPORT: &str = "apk_report_export";
 pub const FEATURE_SIGNING_V31: &str = "signing_v31";
 pub const FEATURE_ADB_MULTI_DEVICE: &str = "adb_multi_device";
+pub const FEATURE_ADB_BATCH_INSTALL: &str = "adb_batch_install";
 
 // Replace this Base64URL Ed25519 public key before producing release licenses.
 // The admin CLI prints the matching value when `keygen` is run.
@@ -53,7 +55,8 @@ impl LicenseStatus {
     }
     pub fn is_active(&self) -> bool { self.state == "active" }
     pub fn has_feature(&self, feature: &str) -> bool {
-        self.is_active() && self.features.iter().any(|value| value == feature)
+        self.is_active() && (self.features.iter().any(|value| value == feature)
+            || self.features.iter().any(|value| value == FEATURE_ALL))
     }
 }
 

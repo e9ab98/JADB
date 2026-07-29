@@ -38,6 +38,9 @@ pub struct AppInfo {
     pub min_sdk: Option<String>,
     pub target_sdk: Option<String>,
     pub apk_path: Option<String>,
+    /// Sum of base.apk and all split APK files currently installed.
+    pub apk_total_size: Option<u64>,
+    pub apk_count: usize,
     /// Absolute path inside the APK (e.g. `res/mipmap-mdpi-v4/ic_launcher.png`).
     pub icon_path: Option<String>,
     /// `data:image/png;base64,...` — populated by `pull_app_icon`.
@@ -345,13 +348,54 @@ fn parse_apk_paths(stdout: &str) -> Vec<String> {
 }
 
 /// Read `pm path <pkg>` to get all on-device APK paths for a package.
-async fn apk_paths_for(settings: &Settings, device: &str, package: &str) -> AppResult<Vec<String>> {
+pub async fn apk_paths_for(settings: &Settings, device: &str, package: &str) -> AppResult<Vec<String>> {
     let out = run_adb_shell(settings, device, &["pm", "path", package]).await?;
     let paths = parse_apk_paths(&out);
     if paths.is_empty() {
         return Err(AppError::NotFound(format!("pm path for {package}")));
     }
     Ok(paths)
+}
+
+
+async fn apk_sizes_for(settings: &Settings, device: &str, paths: &[String]) -> Option<u64> {
+    if paths.is_empty() { return None; }
+    let mut total = 0u64;
+    for path in paths {
+        // Pass the quoted path as part of one shell command. Android adb shell
+        // argument forwarding does not preserve `sh -c` arguments uniformly
+        // across platform-tools versions, which made the previous loop return
+        // an empty result on many devices.
+        let command = format!("wc -c < {}", shell_quote(path));
+        let output = run_adb_shell(settings, device, &[&command]).await.ok()?;
+        let size = output
+            .split_whitespace()
+            .find_map(|value| value.parse::<u64>().ok())?;
+        total = total.checked_add(size)?;
+    }
+    Some(total)
+}
+
+pub async fn pull_apk_to_cache(
+    app: &AppHandle,
+    settings: &Settings,
+    device: &str,
+    package: &str,
+    remote_path: &str,
+) -> AppResult<String> {
+    let available = apk_paths_for(settings, device, package).await?;
+    if !available.iter().any(|path| path == remote_path) {
+        return Err(AppError::InvalidInput("selected APK does not belong to package".into()));
+    }
+    let name = Path::new(remote_path).file_name().and_then(|value| value.to_str())
+        .ok_or_else(|| AppError::Parse("invalid remote APK filename".into()))?;
+    let cache = app.path().app_cache_dir().map_err(|e| AppError::Config(e.to_string()))?
+        .join("device-apks").join(sanitize(device)).join(sanitize(package));
+    tokio::fs::create_dir_all(&cache).await?;
+    let local = cache.join(name);
+    let local_string = local.to_string_lossy().into_owned();
+    download_direct(settings, device, remote_path, &local_string).await?;
+    Ok(local_string)
 }
 
 async fn aapt_dump_badging(settings: &Settings, apk_path: &Path) -> AppResult<String> {
@@ -559,6 +603,8 @@ pub async fn package_info(
         .join(sanitize(package));
     tokio::fs::create_dir_all(&cache_root).await?;
     let apk_remotes = apk_paths_for(settings, device, package).await?;
+    info.apk_count = apk_remotes.len();
+    info.apk_total_size = apk_sizes_for(settings, device, &apk_remotes).await;
     let local_apks = local_apk_paths(&cache_root, &apk_remotes);
     for (apk_remote, local_apk) in apk_remotes.iter().zip(local_apks.iter()) {
         if !local_apk.exists() {
@@ -656,6 +702,40 @@ pub async fn shell_exec(
         exit_code: output.status.code().unwrap_or(-1),
         command: command.to_string(),
     })
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct InstallApkItemResult {
+    pub path: String,
+    pub success: bool,
+    pub message: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct InstallApksResult {
+    pub succeeded: usize,
+    pub failed: usize,
+    pub items: Vec<InstallApkItemResult>,
+}
+
+pub async fn install_apks(settings: &Settings, device: &str, paths: &[String]) -> AppResult<InstallApksResult> {
+    if paths.is_empty() { return Err(AppError::InvalidInput("no APK selected".into())); }
+    let mut items = Vec::with_capacity(paths.len());
+    for path in paths {
+        let local = Path::new(path);
+        if !local.is_file() || local.extension().and_then(|value| value.to_str()).map(|value| !value.eq_ignore_ascii_case("apk")).unwrap_or(true) {
+            items.push(InstallApkItemResult { path: path.clone(), success: false, message: "invalid APK file".into() });
+            continue;
+        }
+        match run_adb(settings, Some(device), &["install", "-r", path]).await {
+            Ok(message) => items.push(InstallApkItemResult { path: path.clone(), success: true, message: message.trim().into() }),
+            Err(error) => items.push(InstallApkItemResult { path: path.clone(), success: false, message: error.to_string() }),
+        }
+    }
+    let succeeded = items.iter().filter(|item| item.success).count();
+    Ok(InstallApksResult { succeeded, failed: items.len() - succeeded, items })
 }
 
 pub async fn uninstall(settings: &Settings, device: &str, package: &str) -> AppResult<String> {

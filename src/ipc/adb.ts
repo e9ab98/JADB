@@ -16,6 +16,8 @@ export type AppInfo = {
   minSdk: string | null;
   targetSdk: string | null;
   apkPath: string | null;
+  apkTotalSize: number | null;
+  apkCount: number;
   iconPath: string | null;
   iconDataUrl: string | null;
   isSystem: boolean;
@@ -26,6 +28,12 @@ export type ExportApksResult = {
   count: number;
   directory: string;
 };
+
+export const adbApkPaths = (device: string, packageName: string) =>
+  invoke<string[]>('adb_apk_paths', { device, package: packageName });
+
+export const adbPullApkForTool = (device: string, packageName: string, remotePath: string) =>
+  invoke<string>('adb_pull_apk_for_tool', { device, package: packageName, remotePath });
 
 export async function adbDevices(): Promise<AdbDevice[]> {
   return invoke<AdbDevice[]>('adb_devices');
@@ -59,6 +67,11 @@ export async function adbAppIcon(
 ): Promise<string | null> {
   return invoke<string | null>('adb_app_icon', { device, package: packageName });
 }
+
+export type InstallApkItemResult = { path: string; success: boolean; message: string };
+export type InstallApksResult = { succeeded: number; failed: number; items: InstallApkItemResult[] };
+export const adbInstallApks = (device: string, paths: string[]) =>
+  invoke<InstallApksResult>('adb_install_apks', { device, paths });
 
 export async function adbUninstall(
   device: string,

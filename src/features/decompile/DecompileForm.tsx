@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import '@/i18n';
 import { toast } from 'sonner';
@@ -13,7 +14,10 @@ type Props = { onStarted: (h: TaskHandle) => void };
 
 export function DecompileForm({ onStarted }: Props) {
   const { t } = useTranslation();
-  const [apk, setApk] = useState<string | null>(null);
+  const [params] = useSearchParams();
+  const routeApk = params.get('apk');
+  const [apk, setApk] = useState<string | null>(() => routeApk);
+  useEffect(() => { if (routeApk) setApk(routeApk); }, [routeApk]);
   const [out, setOut] = useState<string | null>(null);
   const [force, setForce] = useState(false);
   const [busy, setBusy] = useState(false);

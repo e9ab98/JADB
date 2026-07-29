@@ -99,7 +99,7 @@ fn resolve_gui_bin(jadx_dir: &str) -> Option<PathBuf> {
 /// Launch the JADX GUI in a detached child process so closing JADB does
 /// not tear it down. Used by the sidebar "应用 → JADX" entry.
 #[tauri::command]
-pub async fn launch_jadx_gui(app: AppHandle) -> AppResult<()> {
+pub async fn launch_jadx_gui(app: AppHandle, apk_path: Option<String>) -> AppResult<()> {
     let dir = app
         .path()
         .app_data_dir()
@@ -162,6 +162,12 @@ pub async fn launch_jadx_gui(app: AppHandle) -> AppResult<()> {
             path = combined;
             cmd.env("PATH", path);
         }
+    }
+    if let Some(apk_path) = apk_path.as_deref() {
+        if apk_path.trim().is_empty() || !Path::new(apk_path).exists() {
+            return Err(AppError::InvalidInput("JADX APK path is invalid".into()));
+        }
+        cmd.arg(apk_path);
     }
     cmd.stdin(Stdio::null())
         .stdout(Stdio::null())

@@ -1,7 +1,8 @@
 use crate::config::settings;
 use crate::error::{AppError, AppResult};
-use crate::services::adb_manager::{self, AdbDevice, AppInfo, DirEntry, ExportApksResult};
-use tauri::{AppHandle, Manager};
+use crate::services::adb_manager::{self, AdbDevice, AppInfo, DirEntry, ExportApksResult, InstallApksResult};
+use tauri::{AppHandle, Manager, State};
+use crate::services::license::{LicenseService, FEATURE_ADB_BATCH_INSTALL};
 
 #[tauri::command]
 pub async fn adb_devices(app: AppHandle) -> AppResult<Vec<AdbDevice>> {
@@ -83,6 +84,21 @@ pub async fn adb_app_icon(
 }
 
 #[tauri::command]
+pub async fn adb_install_apks(
+    app: AppHandle,
+    license: State<'_, LicenseService>,
+    device: String,
+    paths: Vec<String>,
+) -> AppResult<InstallApksResult> {
+    if paths.len() > 1 {
+        license.require_feature(&app, FEATURE_ADB_BATCH_INSTALL).await?;
+    }
+    let dir = app.path().app_data_dir().map_err(|e| AppError::Config(e.to_string()))?;
+    let s = settings::read(&dir).await?;
+    adb_manager::install_apks(&s, &device, &paths).await
+}
+
+#[tauri::command]
 pub async fn adb_uninstall(
     app: AppHandle,
     device: String,
@@ -94,6 +110,21 @@ pub async fn adb_uninstall(
         .map_err(|e| AppError::Config(e.to_string()))?;
     let s = settings::read(&dir).await?;
     adb_manager::uninstall(&s, &device, &package).await
+}
+
+
+#[tauri::command]
+pub async fn adb_apk_paths(app: AppHandle, device: String, package: String) -> AppResult<Vec<String>> {
+    let dir = app.path().app_data_dir().map_err(|e| AppError::Config(e.to_string()))?;
+    let s = settings::read(&dir).await?;
+    adb_manager::apk_paths_for(&s, &device, &package).await
+}
+
+#[tauri::command]
+pub async fn adb_pull_apk_for_tool(app: AppHandle, device: String, package: String, remote_path: String) -> AppResult<String> {
+    let dir = app.path().app_data_dir().map_err(|e| AppError::Config(e.to_string()))?;
+    let s = settings::read(&dir).await?;
+    adb_manager::pull_apk_to_cache(&app, &s, &device, &package, &remote_path).await
 }
 
 #[tauri::command]

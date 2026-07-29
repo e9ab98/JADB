@@ -1,7 +1,13 @@
+import { useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import '@/i18n';
-import { Smartphone } from 'lucide-react';
+import { Loader2, PackagePlus, Smartphone } from 'lucide-react';
+import { open } from '@tauri-apps/plugin-dialog';
+import { toast } from 'sonner';
+import { Button } from '@/components/ui/button';
+import { adbInstallApks } from '@/ipc/adb';
+import { useLicenseStore } from '@/store/license';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { AdbAppsTab } from '@/features/adb/AdbAppsTab';
 import { AdbShellTab } from '@/features/adb/AdbShellTab';
@@ -17,6 +23,30 @@ export function AppsView() {
   const { t } = useTranslation();
   const [searchParams] = useSearchParams();
   const serial = searchParams.get('serial');
+  const [installing, setInstalling] = useState(false);
+  const [refreshKey, setRefreshKey] = useState(0);
+
+  async function installApks() {
+    if (!serial || installing) return;
+    const picked = await open({ multiple: true, filters: [{ name: 'APK', extensions: ['apk'] }] });
+    const paths = typeof picked === 'string' ? [picked] : picked;
+    if (!paths || paths.length === 0) return;
+    if (paths.length > 1 && !useLicenseStore.getState().requireFeature('adb_batch_install')) return;
+    setInstalling(true);
+    try {
+      const result = await adbInstallApks(serial, paths);
+      if (result.failed === 0) toast.success(t('adb.installSuccess', { count: result.succeeded }));
+      else {
+        toast.error(t('adb.installPartial', { success: result.succeeded, failed: result.failed }));
+        result.items.filter((item) => !item.success).forEach((item) => toast.error(`${item.path.split(/[\\/]/).pop()}: ${item.message}`));
+      }
+      if (result.succeeded > 0) setRefreshKey((value) => value + 1);
+    } catch (error) {
+      const message = String(error);
+      if (message.includes('VIP_REQUIRED:adb_batch_install')) useLicenseStore.getState().requireFeature('adb_batch_install');
+      else toast.error(message);
+    } finally { setInstalling(false); }
+  }
 
   if (!serial) {
     return (
@@ -43,6 +73,10 @@ export function AppsView() {
             {serial}
           </span>
         </div>
+        <Button onClick={() => void installApks()} disabled={installing}>
+          {installing ? <Loader2 className="h-4 w-4 animate-spin" /> : <PackagePlus className="h-4 w-4" />}
+          {installing ? t('adb.installing') : t('adb.installApk')}
+        </Button>
       </header>
 
       <main className="flex-1 overflow-auto p-6">
@@ -52,7 +86,7 @@ export function AppsView() {
             <TabsTrigger value="shell">{t('adb.shellTab')}</TabsTrigger>
           </TabsList>
           <TabsContent value="apps">
-            <AdbAppsTab key={serial} serial={serial} />
+            <AdbAppsTab key={`${serial}-${refreshKey}`} serial={serial} />
           </TabsContent>
           <TabsContent value="shell">
             <AdbShellTab key={serial} serial={serial} />

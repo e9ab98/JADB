@@ -30,8 +30,8 @@ export async function jadxDecompile(
  * (CJK / emoji / etc.) are decoded correctly in JADX-GUI's UI and
  * file dialog.
  */
-export async function launchJadxGui(): Promise<void> {
-  await invoke<void>('launch_jadx_gui');
+export async function launchJadxGui(apkPath?: string): Promise<void> {
+  await invoke<void>('launch_jadx_gui', { apkPath: apkPath ?? null });
 }
 
 export async function pickApk(): Promise<string | null> {

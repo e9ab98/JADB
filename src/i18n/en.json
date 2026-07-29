@@ -419,7 +419,22 @@
     "cannotOpenDataDirDeviceClosed": "Cannot access /data/data/{{pkg}}: ADB connection lost ({{device}}). Reconnect the device and try again.",
     "cannotOpenDataDirNotFound": "Cannot access /data/data/{{pkg}} ({{device}}): directory not found. The app data may have been cleared, or the app hasn't run on this device yet.",
     "cannotOpenDataDirGeneric": "Cannot access /data/data/{{pkg}} ({{device}}): {{error}}",
-    "openDataDirFailedGeneric": "Failed to open data-dir window ({{device}} · {{pkg}}): {{error}}"
+    "openDataDirFailedGeneric": "Failed to open data-dir window ({{device}} · {{pkg}}): {{error}}",
+    "apkTools": "APK tools",
+    "analyzeApk": "Analyze APK",
+    "openWithJadx": "Open with JADX",
+    "decompileApk": "Decompile APK",
+    "selectApkTitle": "Select an APK",
+    "selectApkHint": "This app contains multiple APKs. Select the file to process.",
+    "mainApk": "Main APK",
+    "useSelectedApk": "Use this APK",
+    "noApkFound": "No APK was found",
+    "apkSize": "APK size",
+    "apkCount": "{{count}} APKs",
+    "installApk": "Install APK",
+    "installing": "Installing…",
+    "installSuccess": "Installed {{count}} APK(s)",
+    "installPartial": "Installation finished: {{success}} succeeded, {{failed}} failed"
   },
   "sidebar": {
     "version": "{{version}}",
@@ -536,9 +551,11 @@
       "invalid": "Invalid license"
     },
     "feature": {
+      "all": "All modules (full unlock)",
       "apk_report_export": "APK analysis report export",
       "signing_v31": "APK Signature Scheme v3.1 signing",
-      "adb_multi_device": "Open more than 2 ADB devices at once"
+      "adb_multi_device": "Open more than 2 ADB devices at once",
+      "adb_batch_install": "Batch install APKs with ADB"
     },
     "purchaseTitle": "Purchase JADB VIP",
     "purchaseHint": "Contact WeChat godfeer to purchase a license",

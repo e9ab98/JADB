@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 
-export type LicenseFeature = 'apk_report_export' | 'signing_v31' | 'adb_multi_device';
+export type LicenseFeature = 'apk_report_export' | 'signing_v31' | 'adb_multi_device' | 'adb_batch_install';
 export type LicenseState = 'unlicensed' | 'active' | 'expired' | 'deviceMismatch' | 'invalid';
 
 export type LicenseStatus = {

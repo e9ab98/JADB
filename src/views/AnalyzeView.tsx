@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { open } from '@tauri-apps/plugin-dialog';
 import '@/i18n';
 import { toast } from 'sonner';
@@ -44,6 +44,8 @@ function isToolMissingAapt2(message: string): boolean {
 export function AnalyzeView() {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const initialApk = searchParams.get('apk');
   const aaptPath = useSettingsStore((s) => s.settings?.aaptPath ?? null);
   const rulesPath = useSettingsStore((s) => s.settings?.rulesPath ?? null);
 
@@ -56,14 +58,8 @@ export function AnalyzeView() {
   const [ruleReport, setRuleReport] = useState<RuleReport | null>(null);
   const [rulesBusy, setRulesBusy] = useState(false);
 
-  async function pickAndAnalyze() {
+  async function analyzePath(picked: string) {
     try {
-      const picked = await open({
-        multiple: false,
-        filters: [{ name: 'APK', extensions: ['apk'] }],
-      });
-      if (typeof picked !== 'string') return;
-
       setPath(picked);
       setInfo(null);
       setError(null);
@@ -109,6 +105,17 @@ export function AnalyzeView() {
       setBusy(false);
     }
   }
+
+  async function pickAndAnalyze() {
+    const picked = await open({ multiple: false, filters: [{ name: 'APK', extensions: ['apk'] }] });
+    if (typeof picked === 'string') await analyzePath(picked);
+  }
+
+  useEffect(() => {
+    if (initialApk) void analyzePath(initialApk);
+    // A reused analyzer window receives a new APK through the hash query.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialApk]);
 
   async function exportReport() {
     if (!info) return;

@@ -165,18 +165,26 @@ pub async fn open_data_dir_window(
 /// Open (or focus) the standalone 反编译 window. Lives at its own URL
 /// route so it renders without the main sidebar (see `App.tsx`).
 #[tauri::command]
-pub async fn open_decompile_window(app: AppHandle) -> AppResult<()> {
+pub async fn open_decompile_window(app: AppHandle, apk_path: Option<String>) -> AppResult<()> {
     const LABEL: &str = "decompile";
     let title = "反编译";
 
     if let Some(window) = app.get_webview_window(LABEL) {
-        window
-            .set_focus()
-            .map_err(|e| AppError::Config(e.to_string()))?;
+        if let Some(path) = apk_path {
+            let mut url = window.url().map_err(|e| AppError::Config(e.to_string()))?;
+            url.set_path("/index.html");
+            url.set_query(None);
+            url.set_fragment(Some(&format!("/decompile?apk={}", url_path_encode(&path))));
+            window.navigate(url).map_err(|e| AppError::Config(e.to_string()))?;
+        }
+        window.set_focus().map_err(|e| AppError::Config(e.to_string()))?;
         return Ok(());
     }
 
-    WebviewWindowBuilder::new(&app, LABEL, WebviewUrl::App("index.html#/decompile".into()))
+    WebviewWindowBuilder::new(&app, LABEL, WebviewUrl::App(match apk_path {
+        Some(path) => format!("index.html#/decompile?apk={}", url_path_encode(&path)).into(),
+        None => "index.html#/decompile".into(),
+    }))
         .title(title)
         .inner_size(900.0, 620.0)
         .min_inner_size(640.0, 480.0)
@@ -215,18 +223,26 @@ pub async fn open_repackage_window(app: AppHandle) -> AppResult<()> {
 /// analyzer workflow can take a while (aapt2 + rule packs), so we keep it
 /// out of the main shell like 反编译 / 重打包.
 #[tauri::command]
-pub async fn open_analyze_window(app: AppHandle) -> AppResult<()> {
+pub async fn open_analyze_window(app: AppHandle, apk_path: Option<String>) -> AppResult<()> {
     const LABEL: &str = "analyze";
     let title = "分析";
 
     if let Some(window) = app.get_webview_window(LABEL) {
-        window
-            .set_focus()
-            .map_err(|e| AppError::Config(e.to_string()))?;
+        if let Some(path) = apk_path {
+            let mut url = window.url().map_err(|e| AppError::Config(e.to_string()))?;
+            url.set_path("/index.html");
+            url.set_query(None);
+            url.set_fragment(Some(&format!("/analyze?apk={}", url_path_encode(&path))));
+            window.navigate(url).map_err(|e| AppError::Config(e.to_string()))?;
+        }
+        window.set_focus().map_err(|e| AppError::Config(e.to_string()))?;
         return Ok(());
     }
 
-    WebviewWindowBuilder::new(&app, LABEL, WebviewUrl::App("index.html#/analyze".into()))
+    WebviewWindowBuilder::new(&app, LABEL, WebviewUrl::App(match apk_path {
+        Some(path) => format!("index.html#/analyze?apk={}", url_path_encode(&path)).into(),
+        None => "index.html#/analyze".into(),
+    }))
         .title(title)
         .inner_size(900.0, 720.0)
         .min_inner_size(640.0, 480.0)

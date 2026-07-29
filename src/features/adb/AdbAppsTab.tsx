@@ -11,6 +11,9 @@ import {
   FolderOpen,
   Loader2,
   Package as PackageIcon,
+  MoreVertical,
+  FileSearch,
+  Code2,
   Play,
   Power,
   RefreshCw,
@@ -19,6 +22,7 @@ import {
   Trash2,
 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
@@ -33,6 +37,8 @@ import {
 import { Switch } from '@/components/ui/switch';
 import {
   adbAppIcon,
+  adbApkPaths,
+  adbPullApkForTool,
   adbAppInfo,
   adbClearCache,
   adbExportApks,
@@ -45,15 +51,18 @@ import {
   resolveAppDataDir,
   type AppInfo,
 } from '@/ipc/adb';
-import { openDataDirWindow } from '@/ipc/window';
-import { cn } from '@/lib/utils';
+import { openAnalyzeWindow, openDataDirWindow, openDecompileWindow } from '@/ipc/window';
+import { launchJadxGui } from '@/ipc/jadx';
+import { cn, formatBytes } from '@/lib/utils';
 
 type Props = {
   serial: string | null;
 };
 
 type AppRow = AppInfo & { iconAttempted: boolean; iconLoading: boolean };
-type AppCardAction = 'launch' | 'stop' | 'clear' | 'export';
+type AppCardAction = 'launch' | 'stop' | 'clear' | 'export' | 'tool';
+type ApkToolAction = 'analyze' | 'jadx' | 'decompile';
+type ApkSelection = { row: AppRow; action: ApkToolAction; paths: string[]; selected: string };
 
 function matchesQuery(app: AppRow, q: string): boolean {
   if (!q) return true;
@@ -78,6 +87,7 @@ export function AdbAppsTab({ serial }: Props) {
   // release-package click. Re-populated on demand; cleared on unmount.
   const [rootStatus, setRootStatus] = useState<Record<string, boolean>>({});
   const [pendingClear, setPendingClear] = useState<AppRow | null>(null);
+  const [apkSelection, setApkSelection] = useState<ApkSelection | null>(null);
   // Per-row in-flight destructive action. Key = packageName, value = which
   // action is running (lets us show a spinner on the right button).
   const [busyAction, setBusyAction] = useState<Map<string, AppCardAction>>(
@@ -119,6 +129,8 @@ export function AdbAppsTab({ serial }: Props) {
             minSdk: null,
             targetSdk: null,
             apkPath: null,
+            apkTotalSize: null,
+            apkCount: 0,
             iconPath: null,
             iconDataUrl: null,
             iconAttempted: false,
@@ -212,6 +224,8 @@ export function AdbAppsTab({ serial }: Props) {
                 minSdk: null,
                 targetSdk: null,
                 apkPath: null,
+                apkTotalSize: null,
+                apkCount: 0,
                 iconPath: null,
                 iconDataUrl: null,
                 iconAttempted: false,
@@ -225,6 +239,8 @@ export function AdbAppsTab({ serial }: Props) {
               minSdk: info.minSdk ?? existing?.minSdk ?? null,
               targetSdk: info.targetSdk ?? existing?.targetSdk ?? null,
               apkPath: info.apkPath ?? existing?.apkPath ?? null,
+              apkTotalSize: info.apkTotalSize,
+              apkCount: info.apkCount,
               iconPath: info.iconPath ?? existing?.iconPath ?? null,
               isSystem: info.isSystem,
               isDebuggable: info.isDebuggable,
@@ -574,6 +590,34 @@ export function AdbAppsTab({ serial }: Props) {
     }
   }
 
+  async function startApkTool(row: AppRow, action: ApkToolAction) {
+    if (!serial) return;
+    setRowAction(row.packageName, 'tool');
+    try {
+      const paths = await adbApkPaths(serial, row.packageName);
+      if (paths.length === 1 && paths[0]) await pullAndOpenTool(row, action, paths[0]);
+      else {
+        const preferred = paths.find((path) => path.endsWith('/base.apk')) ?? paths[0];
+        if (!preferred) throw new Error(t('adb.noApkFound'));
+        setApkSelection({ row, action, paths, selected: preferred });
+      }
+    } catch (error) { toast.error(String(error)); }
+    finally { setRowAction(row.packageName, null); }
+  }
+
+  async function pullAndOpenTool(row: AppRow, action: ApkToolAction, remotePath: string) {
+    if (!serial) return;
+    setRowAction(row.packageName, 'tool');
+    try {
+      const local = await adbPullApkForTool(serial, row.packageName, remotePath);
+      if (action === 'analyze') await openAnalyzeWindow(local);
+      else if (action === 'jadx') await launchJadxGui(local);
+      else await openDecompileWindow(local);
+      setApkSelection(null);
+    } catch (error) { toast.error(String(error)); }
+    finally { setRowAction(row.packageName, null); }
+  }
+
   async function exportApks(row: AppRow) {
     if (!serial) return;
     const pkg = row.packageName;
@@ -721,10 +765,27 @@ export function AdbAppsTab({ serial }: Props) {
               onOpenDataDir={() => void openDataDir(row)}
               onExportApks={() => void exportApks(row)}
               onUninstall={() => setPendingUninstall(row)}
+              onApkTool={(action) => void startApkTool(row, action)}
             />
           ))}
         </div>
       )}
+
+      <Dialog open={apkSelection !== null} onOpenChange={(open) => !open && setApkSelection(null)}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>{t('adb.selectApkTitle')}</DialogTitle><DialogDescription>{t('adb.selectApkHint')}</DialogDescription></DialogHeader>
+          <div className="max-h-72 space-y-2 overflow-auto">
+            {apkSelection?.paths.map((path) => {
+              const name = path.split('/').pop() ?? path;
+              return <label key={path} className="flex cursor-pointer items-start gap-3 rounded-lg border border-border p-3 hover:bg-bg-2">
+                <input type="radio" name="apk-path" checked={apkSelection.selected === path} onChange={() => setApkSelection({ ...apkSelection, selected: path })} className="mt-1" />
+                <span className="min-w-0"><span className="flex items-center gap-2 text-sm font-medium text-text-0">{name}{name === 'base.apk' && <Badge variant="secondary">{t('adb.mainApk')}</Badge>}</span><span className="block truncate font-mono text-xs text-text-2" title={path}>{path}</span></span>
+              </label>;
+            })}
+          </div>
+          <DialogFooter><Button variant="outline" onClick={() => setApkSelection(null)}>{t('common.cancel')}</Button><Button onClick={() => apkSelection && void pullAndOpenTool(apkSelection.row, apkSelection.action, apkSelection.selected)}>{t('adb.useSelectedApk')}</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog
         open={pendingUninstall !== null}
@@ -822,6 +883,7 @@ function AppCard({
   onOpenDataDir,
   onExportApks,
   onUninstall,
+  onApkTool,
 }: {
   app: AppRow;
   infoLoading: boolean;
@@ -832,6 +894,7 @@ function AppCard({
   onOpenDataDir: () => void;
   onExportApks: () => void;
   onUninstall: () => void;
+  onApkTool: (action: ApkToolAction) => void;
 }) {
   const { t } = useTranslation();
   const displayLabel = app.appLabel ?? app.packageName;
@@ -855,7 +918,9 @@ function AppCard({
             )}
           </div>
           <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-1">
+            <div className="flex items-start gap-1">
+              <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-1">
               <div
                 className={cn(
                   'truncate text-sm font-semibold text-text-0',
@@ -883,6 +948,16 @@ function AppCard({
                   : t('adb.releaseBuild')}
               </Badge>
             </div>
+              </div>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild><Button size="sm" variant="ghost" disabled={busyAction !== null} title={t('adb.apkTools')}><MoreVertical className="h-4 w-4" /></Button></DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onSelect={() => onApkTool('analyze')}><FileSearch className="h-4 w-4" />{t('adb.analyzeApk')}</DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => onApkTool('jadx')}><Code2 className="h-4 w-4" />{t('adb.openWithJadx')}</DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => onApkTool('decompile')}><FolderOpen className="h-4 w-4" />{t('adb.decompileApk')}</DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
             {app.appLabel && (
               <div
                 className="truncate font-mono text-xs text-text-2"
@@ -903,6 +978,14 @@ function AppCard({
                 : infoLoading
                 ? '…'
                 : '—'}
+            </span>
+          </div>
+          <div className="flex items-center justify-between gap-2">
+            <span>{t('adb.apkSize')}</span>
+            <span className="font-mono text-text-1">
+              {app.apkTotalSize !== null
+                ? `${formatBytes(app.apkTotalSize)}${app.apkCount > 1 ? ` · ${t('adb.apkCount', { count: app.apkCount })}` : ''}`
+                : infoLoading ? '…' : '—'}
             </span>
           </div>
           <div className="flex items-center justify-between gap-2">

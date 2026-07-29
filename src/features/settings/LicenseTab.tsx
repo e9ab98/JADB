@@ -46,6 +46,7 @@ export function LicenseTab() {
                 <div className="flex items-center gap-2 text-text-1"><CheckCircle2 className="h-4 w-4 text-brand" />{t('license.feature.apk_report_export')}</div>
                 <div className="flex items-center gap-2 text-text-1"><CheckCircle2 className="h-4 w-4 text-brand" />{t('license.feature.signing_v31')}</div>
                 <div className="flex items-center gap-2 text-text-1"><CheckCircle2 className="h-4 w-4 text-brand" />{t('license.feature.adb_multi_device')}</div>
+                <div className="flex items-center gap-2 text-text-1"><CheckCircle2 className="h-4 w-4 text-brand" />{t('license.feature.adb_batch_install')}</div>
               </div>
               <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border pt-3 text-text-2">
                 <span>{t('license.purchasePrefix')} <code className="font-semibold text-text-0">godfeer</code></span>

@@ -419,7 +419,22 @@
     "cannotOpenDataDirDeviceClosed": "无法访问 /data/data/{{pkg}}:ADB 连接已断开 ({{device}})。请重新连接设备后重试。",
     "cannotOpenDataDirNotFound": "无法访问 /data/data/{{pkg}} ({{device}}):目录不存在。应用数据可能已被清除,或应用尚未在该设备上运行过。",
     "cannotOpenDataDirGeneric": "无法访问 /data/data/{{pkg}} ({{device}}):{{error}}",
-    "openDataDirFailedGeneric": "打开数据目录窗口失败 ({{device}} · {{pkg}}):{{error}}"
+    "openDataDirFailedGeneric": "打开数据目录窗口失败 ({{device}} · {{pkg}}):{{error}}",
+    "apkTools": "APK 工具",
+    "analyzeApk": "分析 APK",
+    "openWithJadx": "使用 JADX 打开",
+    "decompileApk": "反编译 APK",
+    "selectApkTitle": "选择要处理的 APK",
+    "selectApkHint": "该应用包含多个 APK，请选择本次要使用的文件。",
+    "mainApk": "主 APK",
+    "useSelectedApk": "使用此 APK",
+    "noApkFound": "未找到可用的 APK",
+    "apkSize": "APK 大小",
+    "apkCount": "{{count}} 个 APK",
+    "installApk": "安装 APK",
+    "installing": "正在安装…",
+    "installSuccess": "成功安装 {{count}} 个 APK",
+    "installPartial": "安装完成：成功 {{success}} 个，失败 {{failed}} 个"
   },
   "sidebar": {
     "version": "{{version}}",
@@ -536,9 +551,11 @@
       "invalid": "授权无效"
     },
     "feature": {
+      "all": "全部模块（通用授权）",
       "apk_report_export": "APK 分析报告导出",
       "signing_v31": "APK Signature Scheme v3.1 签名",
-      "adb_multi_device": "ADB 同时打开超过 2 个设备"
+      "adb_multi_device": "ADB 同时打开超过 2 个设备",
+      "adb_batch_install": "ADB 批量安装 APK"
     },
     "purchaseTitle": "购买 JADB VIP",
     "purchaseHint": "购买授权请联系微信 godfeer",

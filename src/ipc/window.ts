@@ -42,8 +42,8 @@ export async function openDataDirWindow(
  * sidebar so the user can keep working in the shell while a decompile
  * task runs.
  */
-export async function openDecompileWindow(): Promise<void> {
-  await invoke<void>('open_decompile_window');
+export async function openDecompileWindow(apkPath?: string): Promise<void> {
+  await invoke<void>('open_decompile_window', { apkPath: apkPath ?? null });
 }
 
 /**
@@ -56,6 +56,6 @@ export async function openRepackageWindow(): Promise<void> {
 /**
  * Open (or focus) the standalone 分析 window.
  */
-export async function openAnalyzeWindow(): Promise<void> {
-  await invoke<void>('open_analyze_window');
+export async function openAnalyzeWindow(apkPath?: string): Promise<void> {
+  await invoke<void>('open_analyze_window', { apkPath: apkPath ?? null });
 }
