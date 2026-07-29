@@ -16,16 +16,11 @@ fn round_trip_settings_preserves_all_fields() {
     let path = tmp.join("settings.json");
     let original = Settings {
         aapt_path: Some("/opt/aapt2".into()),
-        adb_path: None,
         apktool_path: Some("/opt/apktool.jar".into()),
-        uber_apk_signer_path: None,
-        apksigner_path: None,
-        android_build_tools_dir: None,
         jadx_dir: Some("/opt/jadx".into()),
-        rules_path: None,
-        rules_download_url: None,
         language: Language::En,
         theme: ThemeMode::Dark,
+        ..Default::default()
     };
     write_settings_to(&path, &original).unwrap();
     let loaded = read_settings_from(&path).unwrap();
@@ -40,16 +35,8 @@ fn patch_applies_only_non_none_fields() {
     let mut s = Settings::default();
     let patch = SettingsPatch {
         language: Some(Language::En),
-        theme: None,
         aapt_path: Some(Some("/usr/bin/aapt2".into())),
-        adb_path: None,
-        apktool_path: None,
-        uber_apk_signer_path: None,
-        apksigner_path: None,
-        android_build_tools_dir: None,
-        jadx_dir: None,
-        rules_path: None,
-        rules_download_url: None,
+        ..Default::default()
     };
     s.apply(patch);
     assert_eq!(s.language, Language::En);

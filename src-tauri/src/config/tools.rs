@@ -1,9 +1,10 @@
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
 #[serde(rename_all = "kebab-case")]
 pub enum ToolName {
+    #[default]
     Apktool,
     UberApkSigner,
     AndroidBuildTools,
@@ -53,7 +54,7 @@ pub struct PerOsNames {
     pub windows: Option<String>,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct ToolEntry {
     pub name: ToolName,
     pub version: String,

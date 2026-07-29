@@ -8,9 +8,7 @@ fn fixture_apktool() -> ToolEntry {
         download_url: "https://example.com/apktool.jar".into(),
         file_name: "apktool_2.12.1.jar".into(),
         config_name: "apktool_path".into(),
-        unzip_dir: None,
-        platforms: None,
-        binary_sub_path: None,
+        ..Default::default()
     }
 }
 
@@ -22,8 +20,7 @@ fn fixture_jadx() -> ToolEntry {
         file_name: "jadx-1.5.6.zip".into(),
         config_name: "jadx_dir".into(),
         unzip_dir: Some("jadx-1.5.6".into()),
-        platforms: None,
-        binary_sub_path: None,
+        ..Default::default()
     }
 }
 
@@ -41,6 +38,7 @@ fn fixture_aapt2() -> ToolEntry {
             windows: "windows-url".into(),
         }),
         binary_sub_path: Some("aapt2".into()),
+        ..Default::default()
     }
 }
 
@@ -116,6 +114,7 @@ fn fixture_aapt2_with_os_placeholder() -> ToolEntry {
             windows: "windows-url".into(),
         }),
         binary_sub_path: Some("aapt2".into()),
+        ..Default::default()
     }
 }
 
@@ -190,6 +189,7 @@ fn fixture_adb() -> ToolEntry {
             windows: "windows-url".into(),
         }),
         binary_sub_path: Some("adb".into()),
+        ..Default::default()
     }
 }
 
