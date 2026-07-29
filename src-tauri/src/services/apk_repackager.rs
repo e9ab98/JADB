@@ -3,6 +3,7 @@ use tauri::Manager;
 use crate::error::{AppError, AppResult};
 use crate::progress;
 use crate::services::apk_signer;
+use crate::services::java_runtime;
 use crate::services::signature_manager;
 use crate::services::task_registry::TaskRegistry;
 use serde::Serialize;
@@ -56,6 +57,7 @@ pub async fn repackage(
         .path()
         .app_data_dir()
         .map_err(|e| AppError::Config(e.to_string()))?;
+    let runtime = java_runtime::resolve(&settings_clone, Some(&dir))?;
 
     tokio::spawn(async move {
         let mut cmd = Command::new(&apktool_clone);
@@ -162,8 +164,7 @@ pub async fn repackage(
                                 &sig,
                                 schemes,
                                 80.0,
-                                &settings_clone,
-                                &dir,
+                                &runtime.java_bin,
                             )
                             .await
                             {

@@ -551,7 +551,7 @@ async fn extract_tar_gz(archive_path: &Path, dest_dir: &Path) -> AppResult<()> {
                 .iter()
                 .filter(|p| !p.as_os_str().is_empty())
                 .all(|p| p.starts_with(&prefix_path));
-            all_match.then(|| prefix_path)
+            all_match.then_some(prefix_path)
         })();
         // Second pass: actually extract with the (possibly stripped)
         // paths. We re-open the archive because tar::Archive's

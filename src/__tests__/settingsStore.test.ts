@@ -1,28 +1,37 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import type { Settings } from '@/ipc/useTauri';
+
+/// Build a fully-populated `Settings` for use in mocks. Tests that
+/// care about a particular field pass it via `overrides`; everything
+/// else defaults to `null` / `undefined`-equivalent. Centralising the
+/// shape here means a new field added to `Settings` only needs to be
+/// declared once instead of in every mock.
+function makeTestSettings(overrides: Partial<Settings> = {}): Settings {
+  return {
+    aaptPath: null,
+    adbPath: null,
+    apktoolPath: null,
+    uberApkSignerPath: null,
+    apksignerPath: null,
+    androidBuildToolsDir: null,
+    jadxDir: null,
+    javaDir: null,
+    rulesPath: null,
+    rulesDownloadUrl: null,
+    language: 'zhcn',
+    theme: 'system',
+    ...overrides,
+  };
+}
 
 vi.mock('@/ipc/useTauri', () => ({
-  getSettings: vi.fn(async () => ({
-    aaptPath: null,
-    apktoolPath: null,
-    uberApkSignerPath: null,
-    apksignerPath: null,
-    jadxDir: null,
-    javaDir: null,
-    rulesPath: null,
-    language: 'en',
-    theme: 'dark',
-  })),
-  updateSettings: vi.fn(async (patch: Record<string, unknown>) => ({
-    aaptPath: null,
-    apktoolPath: null,
-    uberApkSignerPath: null,
-    apksignerPath: null,
-    jadxDir: null,
-    javaDir: null,
-    rulesPath: null,
-    language: (patch.language as string) ?? 'zhcn',
-    theme: (patch.theme as string) ?? 'system',
-  })),
+  getSettings: vi.fn(async () => makeTestSettings({ language: 'en', theme: 'dark' })),
+  updateSettings: vi.fn(async (patch: Record<string, unknown>) =>
+    makeTestSettings({
+      language: (patch.language as Settings['language']) ?? 'zhcn',
+      theme: (patch.theme as Settings['theme']) ?? 'system',
+    }),
+  ),
 }));
 
 vi.mock('@/ipc/events', () => ({

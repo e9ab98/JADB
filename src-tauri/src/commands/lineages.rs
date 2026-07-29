@@ -1,5 +1,4 @@
 use crate::commands::signatures::SignatureConfig;
-use crate::config::settings;
 use crate::error::{AppError, AppResult};
 use crate::progress;
 use crate::services::apk_signer::resolve_build_tools;
@@ -161,8 +160,7 @@ async fn write_unprotected_p12(
     alias: &str,
     dest: &Path,
     helper: &Path,
-    app_data_dir: &Path,
-    s: &settings::Settings,
+    java_bin: &Path,
 ) -> AppResult<()> {
     const HELPER_SOURCE: &str = r#"
 import java.io.FileInputStream;
@@ -214,8 +212,7 @@ public class JadbMakeUnprotectedP12 {
     let src_str = src.to_string_lossy().into_owned();
     let dest_str = dest.to_string_lossy().into_owned();
     let helper_str = helper.to_string_lossy().into_owned();
-    let runtime = java_runtime::resolve(s, Some(app_data_dir))?;
-    let output = Command::new(&runtime.java_bin)
+    let output = Command::new(java_bin)
         // Force PKCS12 to use the legacy PBE-SHA1-RC2-40 algorithm so the
         // resulting keystore is readable by older apksigner.rotate builds
         // that do not understand PBES2 / SHA-256 / AES.
@@ -277,6 +274,7 @@ pub async fn create_lineage(
         0.1,
         "正在转换旧 keystore 为无密码 PKCS12",
     );
+    let runtime = java_runtime::resolve(&settings, Some(&dir))?;
     if let Err(error) = write_unprotected_p12(
         Path::new(&old.keystore_path),
         &old.keystore_password,
@@ -284,8 +282,7 @@ pub async fn create_lineage(
         &old.key_alias,
         &old_p12,
         &java_helper,
-        &dir,
-        &settings,
+        &runtime.java_bin,
     )
     .await
     {
@@ -317,8 +314,7 @@ pub async fn create_lineage(
         &new.key_alias,
         &new_p12,
         &java_helper,
-        &dir,
-        &settings,
+        &runtime.java_bin,
     )
     .await
     {
@@ -343,7 +339,6 @@ pub async fn create_lineage(
     let tmp_str = tmp.to_string_lossy().into_owned();
 
     progress::emit_progress(&app, "lineage-rotate", 0.5, "正在生成 lineage 文件");
-    let runtime = java_runtime::resolve(&settings, Some(&dir))?;
     let output = Command::new(&runtime.java_bin)
         .args(build_rotate_args(
             &apksigner_jar,

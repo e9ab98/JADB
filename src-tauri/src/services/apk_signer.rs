@@ -185,6 +185,12 @@ pub fn build_apksigner_rotation_args(
     ]
 }
 
+// 8 args (one over clippy's default of 7). Every argument comes
+// from a different concern — task reporting context, build-tools
+// location, signing inputs, progress anchor, java runtime — and
+// bundling them just to satisfy the lint would be ceremony, not
+// clarity. Suppress locally.
+#[allow(clippy::too_many_arguments)]
 pub async fn run_signing(
     app: &AppHandle,
     task_id: &str,
@@ -193,8 +199,7 @@ pub async fn run_signing(
     signature: &SignatureConfig,
     schemes: SigningSchemes,
     progress_base: f32,
-    settings: &Settings,
-    app_data_dir: &Path,
+    java_bin: &Path,
 ) -> AppResult<Option<SigningOutput>> {
     schemes.validate()?;
     let input = PathBuf::from(apk);
@@ -243,8 +248,7 @@ pub async fn run_signing(
 
     let sign_percent = progress_base + (100.0 - progress_base) * 0.45;
     progress::emit_progress(app, task_id, sign_percent, "APK 签名中");
-    let runtime = java_runtime::resolve(settings, Some(app_data_dir))?;
-    let mut apksigner = Command::new(&runtime.java_bin);
+    let mut apksigner = Command::new(java_bin);
     apksigner
         .args(build_apksigner_args(
             &build_tools.apksigner_jar.to_string_lossy(),
@@ -390,6 +394,7 @@ pub async fn sign(
         .path()
         .app_data_dir()
         .map_err(|e| AppError::Config(e.to_string()))?;
+    let runtime = java_runtime::resolve(&settings_clone, Some(&dir))?;
 
     tokio::spawn(async move {
         match run_signing(
@@ -400,8 +405,7 @@ pub async fn sign(
             &signature,
             schemes,
             0.0,
-            &settings_clone,
-            &dir,
+            &runtime.java_bin,
         )
         .await
         {
@@ -525,8 +529,7 @@ pub async fn run_rotation_signing(
     lineage_path: &str,
     v4_enabled: bool,
     progress_base: f32,
-    settings: &Settings,
-    app_data_dir: &Path,
+    java_bin: &Path,
 ) -> AppResult<Option<SigningOutput>> {
     if old_signature.id == new_signature.id {
         return Err(AppError::InvalidInput(
@@ -585,8 +588,7 @@ pub async fn run_rotation_signing(
 
     let sign_percent = progress_base + (100.0 - progress_base) * 0.45;
     progress::emit_progress(app, task_id, sign_percent, "APK 密钥轮换签名中");
-    let runtime = java_runtime::resolve(settings, Some(app_data_dir))?;
-    let mut apksigner = Command::new(&runtime.java_bin);
+    let mut apksigner = Command::new(java_bin);
     apksigner
         .args(build_apksigner_rotation_args(
             &build_tools.apksigner_jar.to_string_lossy(),
@@ -672,6 +674,7 @@ pub async fn sign_rotation(
         .path()
         .app_data_dir()
         .map_err(|e| AppError::Config(e.to_string()))?;
+    let runtime = java_runtime::resolve(&settings_clone, Some(&dir))?;
     let lineage_path = PathBuf::from(&lineage.lineage_path);
     if !lineage_path.is_file() {
         return Err(AppError::InvalidInput(format!(
@@ -697,8 +700,7 @@ pub async fn sign_rotation(
             &lineage_owned,
             v4_enabled,
             0.0,
-            &settings_clone,
-            &dir,
+            &runtime.java_bin,
         )
         .await
         {
