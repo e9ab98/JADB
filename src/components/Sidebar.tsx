@@ -12,6 +12,8 @@ import { checkForUpdate } from '@/lib/update';
 import { UpdateToast } from '@/features/updateNotification/UpdateToast';
 import { ExternalLink } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { Crown } from 'lucide-react';
+import { useLicenseStore } from '@/store/license';
 
 type NavItem = {
   to: string;
@@ -31,8 +33,15 @@ const UPDATE_TOAST_ID = 'jadb-update';
 
 function SidebarFooter() {
   const { t } = useTranslation();
+  const status = useLicenseStore((s) => s.status);
+  const active = status?.state === 'active';
   return (
     <div className="border-t border-border p-3 text-xs text-text-2">
+      <NavLink to="/settings?tab=license" className="mb-2 flex items-center gap-2 rounded-md border border-border bg-bg-1 px-3 py-2 hover:border-brand">
+        <Crown className={cn("h-4 w-4", active ? "text-warning" : "text-text-2")} />
+        <span className="font-medium text-text-0">{active ? t('license.vip') : t('license.free')}</span>
+        <span className="ml-auto text-brand">{active ? t('license.manage') : t('license.activate')}</span>
+      </NavLink>
       <div className="flex items-center justify-between">
         <span>{t('sidebar.version', { version: 'v0.1.0' })}</span>
         <button

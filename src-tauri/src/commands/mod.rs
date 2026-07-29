@@ -13,3 +13,5 @@ pub mod signatures;
 pub mod tools;
 pub mod window;
 pub mod report;
+
+pub mod license;

@@ -26,6 +26,7 @@ import {
 } from '@/ipc/adb';
 import { openAppsWindow } from '@/ipc/window';
 import { useSettingsStore } from '@/store/settings';
+import { useLicenseStore } from '@/store/license';
 import { cn } from '@/lib/utils';
 
 function stateTone(state: string): 'success' | 'warning' | 'danger' {
@@ -124,7 +125,12 @@ export function AdbConnectionPanel() {
     try {
       await openAppsWindow(serial);
     } catch (e) {
-      toast.error(String(e));
+      const message = String(e);
+      if (message.includes('VIP_REQUIRED:adb_multi_device')) {
+        useLicenseStore.getState().requireFeature('adb_multi_device');
+      } else {
+        toast.error(message);
+      }
     } finally {
       setOpeningSerial(null);
     }

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useLicenseStore } from '@/store/license';
 import '@/i18n';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
@@ -195,6 +196,7 @@ export function SignForm({ onStarted }: Props) {
 
   async function startRotation() {
     if (busy || !apk || !lineageId) return;
+    if (!useLicenseStore.getState().requireFeature('signing_v31')) return;
     const entry = lineages.find((item) => item.config.id === lineageId);
     if (!entry) {
       toast.error(t('sign.rotationMissingLineage'));
@@ -376,12 +378,15 @@ export function SignForm({ onStarted }: Props) {
           <Tabs
             value={mode}
             onValueChange={(value) => {
-              if (value === 'standard' || value === 'rotation') setMode(value);
+              if (value === 'standard') setMode(value);
+              if (value === 'rotation' && useLicenseStore.getState().requireFeature('signing_v31')) {
+                setMode(value);
+              }
             }}
           >
             <TabsList>
               <TabsTrigger value="standard">{t('sign.modeStandard')}</TabsTrigger>
-              <TabsTrigger value="rotation">{t('sign.modeRotation')}</TabsTrigger>
+              <TabsTrigger value="rotation">{t('sign.modeRotation')} · VIP</TabsTrigger>
             </TabsList>
 
             <TabsContent value="standard" className="grid gap-3">

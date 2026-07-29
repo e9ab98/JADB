@@ -3,6 +3,7 @@ use crate::error::{AppError, AppResult};
 use crate::services::apk_signature::{self, SignatureInfo};
 use crate::services::apk_signer::{self, SigningSchemes, TaskHandle};
 use crate::services::task_registry::TaskRegistry;
+use crate::services::license::{LicenseService, FEATURE_SIGNING_V31};
 use serde::Deserialize;
 use std::path::PathBuf;
 use tauri::{AppHandle, Manager, State};
@@ -65,6 +66,7 @@ async fn ensure_not_signed(appk: &str, allow_resign: bool) -> AppResult<()> {
 pub async fn sign_apk(
     app: AppHandle,
     registry: State<'_, TaskRegistry>,
+    license: State<'_, LicenseService>,
     request: SignRequest,
 ) -> AppResult<TaskHandle> {
     match request {
@@ -101,6 +103,7 @@ pub async fn sign_apk(
             allow_resign,
             v4_enabled,
         } => {
+            license.require_feature(&app, FEATURE_SIGNING_V31).await?;
             if lineage_id.trim().is_empty() {
                 return Err(AppError::InvalidInput("lineage_id is empty".into()));
             }

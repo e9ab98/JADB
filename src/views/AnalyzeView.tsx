@@ -29,6 +29,7 @@ import { openPath } from '@/ipc/decompile';
 import { getLogPath } from '@/ipc/files';
 import { formatBytes, cn } from '@/lib/utils';
 import { useSettingsStore } from '@/store/settings';
+import { useLicenseStore } from '@/store/license';
 
 function isToolMissingAapt2(message: string): boolean {
   return /tool missing.*aapt2/i.test(message);
@@ -111,6 +112,7 @@ export function AnalyzeView() {
 
   async function exportReport() {
     if (!info) return;
+    if (!useLicenseStore.getState().requireFeature('apk_report_export')) return;
     const fileName = `${info.package_name}_report.html`;
     let dest: string | null = null;
     try {
@@ -190,7 +192,7 @@ export function AnalyzeView() {
               onClick={() => void exportReport()}
             >
               <Download className="h-4 w-4" />
-              {t('analyze.exportReport')}
+              {t('analyze.exportReport')} · VIP
             </Button>
           )}
           <Button onClick={pickAndAnalyze} disabled={busy}>

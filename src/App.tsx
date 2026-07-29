@@ -11,6 +11,9 @@ import { AdbView } from '@/views/AdbView';
 import { AppsView } from '@/views/AppsView';
 import { DataDirView } from '@/views/DataDirView';
 import { useUpdateCheck } from '@/hooks/useUpdateCheck';
+import { useEffect } from 'react';
+import { useLicenseStore } from '@/store/license';
+import { VipRequiredDialog } from '@/components/VipRequiredDialog';
 
 export default function App() {
   useUpdateCheck();
@@ -34,6 +37,8 @@ const STANDALONE_ROUTES = new Set<string>(['/apps', '/data-dir', '/decompile', '
  * commands) and do not need the sidebar.
  */
 function Shell() {
+  const refreshLicense = useLicenseStore((s) => s.refresh);
+  useEffect(() => { void refreshLicense(); }, [refreshLicense]);
   const location = useLocation();
   const isStandaloneWindow = STANDALONE_ROUTES.has(location.pathname);
   return (
@@ -56,6 +61,7 @@ function Shell() {
           <Route path="/data-dir" element={<DataDirView />} />
           <Route path="/settings" element={<SettingsView />} />
         </Routes>
+        <VipRequiredDialog />
         <Toaster richColors position="top-right" />
       </main>
     </div>

@@ -1,5 +1,11 @@
 import { invoke } from '@tauri-apps/api/core';
 
+
+/** Open the authorization page in the main application window. */
+export async function openLicenseCenter(): Promise<void> {
+  await invoke<void>('open_license_center');
+}
+
 /**
  * Open (or focus) the apps window for a given adb device serial.
  *

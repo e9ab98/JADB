@@ -25,7 +25,7 @@ docs/
 # Daily review output is tracked (intentional whitelist)
 !docs/superpowers/daily/
 !docs/superpowers/daily/**
-
+tools/
 # OS noise
 .DS_Store
 Thumbs.db
@@ -51,3 +51,10 @@ scripts/.daily-review.env
 /scripts/uninstall-daily-review-launchd.sh
 /scripts/run-daily-review.sh
 /docs/superpowers/specs/
+
+# Private offline license administration material
+**/jadb-license-private*.pem
+**/*.jadb-license
+**/issued-licenses/
+tools/license-admin/target/
+tools/license-admin/private/

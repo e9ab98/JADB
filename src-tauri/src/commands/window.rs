@@ -1,5 +1,6 @@
 use crate::error::{AppError, AppResult};
-use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri::{AppHandle, Manager, State, WebviewUrl, WebviewWindowBuilder};
+use crate::services::license::{LicenseService, FEATURE_ADB_MULTI_DEVICE};
 
 /// Prefix used for every apps window so we can detect / focus them by label.
 const APPS_WINDOW_PREFIX: &str = "apps-";
@@ -39,10 +40,34 @@ fn url_path_encode(s: &str) -> String {
     out
 }
 
+
+/// Navigate the main application window to the unified license page and focus it.
+/// Standalone child windows call this instead of navigating inside themselves.
+#[tauri::command]
+pub async fn open_license_center(app: AppHandle) -> AppResult<()> {
+    let main = app
+        .get_webview_window("main")
+        .ok_or_else(|| AppError::NotFound("main window".into()))?;
+    let mut url = main.url().map_err(|e| AppError::Config(e.to_string()))?;
+    url.set_path("/index.html");
+    url.set_query(None);
+    url.set_fragment(Some("/settings?tab=license"));
+    main.navigate(url)
+        .map_err(|e| AppError::Config(e.to_string()))?;
+    main.show().map_err(|e| AppError::Config(e.to_string()))?;
+    main.unminimize().map_err(|e| AppError::Config(e.to_string()))?;
+    main.set_focus().map_err(|e| AppError::Config(e.to_string()))?;
+    Ok(())
+}
+
 /// Open (or focus) the apps window for a given device serial. One window per
 /// device so multiple devices can sit side-by-side.
 #[tauri::command]
-pub async fn open_apps_window(app: AppHandle, serial: String) -> AppResult<()> {
+pub async fn open_apps_window(
+    app: AppHandle,
+    license: State<'_, LicenseService>,
+    serial: String,
+) -> AppResult<()> {
     let label = window_label(&serial);
 
     // If a window already exists for this device, just bring it forward.
@@ -51,6 +76,18 @@ pub async fn open_apps_window(app: AppHandle, serial: String) -> AppResult<()> {
             .set_focus()
             .map_err(|e| AppError::Config(e.to_string()))?;
         return Ok(());
+    }
+
+    // Free users may manage two devices side-by-side. Existing windows are
+    // counted rather than currently connected adb devices, so discovery and
+    // other adb clients are never disturbed.
+    let open_device_windows = app
+        .webview_windows()
+        .keys()
+        .filter(|window_label| window_label.starts_with(APPS_WINDOW_PREFIX))
+        .count();
+    if open_device_windows >= 2 {
+        license.require_feature(&app, FEATURE_ADB_MULTI_DEVICE).await?;
     }
 
     let url_path = format!(

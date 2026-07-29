@@ -6,8 +6,9 @@ import { GeneralTab } from '@/features/settings/GeneralTab';
 import { ToolsTab } from '@/features/settings/ToolsTab';
 import { SignaturesTab } from '@/features/settings/SignaturesTab';
 import { useSettingsStore } from '@/store/settings';
+import { LicenseTab } from '@/features/settings/LicenseTab';
 
-const TAB_VALUES = ['general', 'tools', 'signatures'] as const;
+const TAB_VALUES = ['general', 'tools', 'signatures', 'license'] as const;
 type TabValue = (typeof TAB_VALUES)[number];
 
 function isTabValue(v: string | null): v is TabValue {
@@ -48,6 +49,7 @@ export function SettingsView() {
           <TabsTrigger value="signatures">
             {t('settings.signatures')}
           </TabsTrigger>
+          <TabsTrigger value="license">{t('license.title')}</TabsTrigger>
         </TabsList>
         <TabsContent value="general">
           <GeneralTab />
@@ -58,6 +60,7 @@ export function SettingsView() {
         <TabsContent value="signatures">
           <SignaturesTab />
         </TabsContent>
+        <TabsContent value="license"><LicenseTab /></TabsContent>
       </Tabs>
     </div>
   );

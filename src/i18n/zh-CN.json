@@ -508,5 +508,43 @@
     "export": "导出 Lineage",
     "exported": "Lineage 已导出到: {{path}}",
     "exportFailed": "导出 Lineage 失败: {{error}}"
+  },
+  "license": {
+    "title": "授权",
+    "free": "JADB Free",
+    "vip": "JADB VIP",
+    "manage": "管理",
+    "activate": "激活",
+    "statusTitle": "授权状态",
+    "deviceTitle": "本机设备码",
+    "deviceHint": "将此设备码发给授权管理员，用于生成仅限本机使用的离线授权码。",
+    "copy": "复制",
+    "deviceCopied": "设备码已复制",
+    "activateTitle": "激活 VIP",
+    "activateHint": "粘贴管理员生成的完整离线授权码。授权验证不需要联网。",
+    "activated": "VIP 授权激活成功",
+    "remove": "移除本机授权",
+    "perpetual": "永久授权",
+    "expiresAt": "有效期至 {{date}}",
+    "goAuthorize": "前往授权",
+    "vipRequiredTitle": "此功能需要 JADB VIP",
+    "state": {
+      "unlicensed": "未授权",
+      "active": "有效",
+      "expired": "已过期",
+      "deviceMismatch": "设备不匹配",
+      "invalid": "授权无效"
+    },
+    "feature": {
+      "apk_report_export": "APK 分析报告导出",
+      "signing_v31": "APK Signature Scheme v3.1 签名",
+      "adb_multi_device": "ADB 同时打开超过 2 个设备"
+    },
+    "purchaseTitle": "购买 JADB VIP",
+    "purchaseHint": "购买授权请联系微信 godfeer",
+    "copyWechat": "复制微信号",
+    "wechatCopied": "微信号 godfeer 已复制",
+    "vipBenefits": "VIP 可解锁以下功能",
+    "purchasePrefix": "如需开通，请联系微信"
   }
 }

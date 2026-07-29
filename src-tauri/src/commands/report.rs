@@ -1,7 +1,8 @@
 use crate::error::{AppError, AppResult};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use tauri::AppHandle;
+use tauri::{AppHandle, State};
+use crate::services::license::{LicenseService, FEATURE_REPORT_EXPORT};
 
 /// Frontend hands us the entire rendered report payload as a string —
 /// the actual HTML template lives in `src/features/apkAnalyze/reportTemplate.ts`
@@ -23,9 +24,11 @@ pub struct ExportReportResult {
 
 #[tauri::command]
 pub async fn export_apk_report(
-    _app: AppHandle,
+    app: AppHandle,
+    license: State<'_, LicenseService>,
     args: ExportReportArgs,
 ) -> AppResult<ExportReportResult> {
+    license.require_feature(&app, FEATURE_REPORT_EXPORT).await?;
     let dest = PathBuf::from(&args.dest_path);
     if let Some(parent) = dest.parent() {
         if !parent.as_os_str().is_empty() && !parent.exists() {

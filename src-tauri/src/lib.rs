@@ -5,6 +5,7 @@ pub mod progress;
 pub mod services;
 
 use crate::services::task_registry::TaskRegistry;
+use crate::services::license::LicenseService;
 
 pub fn run() {
     tauri::Builder::default()
@@ -15,7 +16,12 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(TaskRegistry::new())
+        .manage(LicenseService::new())
         .invoke_handler(tauri::generate_handler![
+            commands::license::get_device_id,
+            commands::license::get_license_status,
+            commands::license::activate_license,
+            commands::license::remove_license,
             commands::settings::get_settings,
             commands::settings::update_settings,
             commands::tools::get_tool_status,
@@ -66,6 +72,7 @@ pub fn run() {
             commands::cache::scan_cache,
             commands::cache::clear_cache,
             commands::adb::adb_shell,
+            commands::window::open_license_center,
             commands::window::open_apps_window,
             commands::window::open_analyze_window,
             commands::window::open_decompile_window,
