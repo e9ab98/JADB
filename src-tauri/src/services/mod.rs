@@ -1,4 +1,5 @@
 pub mod adb_manager;
+pub mod adb_dumpsys;
 pub mod cache;
 pub mod apk_analyzer;
 pub mod apk_decompiler;

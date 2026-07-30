@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import '@/i18n';
@@ -6,12 +6,13 @@ import { Loader2, PackagePlus, Smartphone } from 'lucide-react';
 import { open } from '@tauri-apps/plugin-dialog';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
-import { adbInstallApks } from '@/ipc/adb';
+import { adbInstallApks, adbSystemInfo, type DeviceSystemInfo } from '@/ipc/adb';
 import { useLicenseStore } from '@/store/license';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { AdbAppsTab } from '@/features/adb/AdbAppsTab';
 import { AdbShellTab } from '@/features/adb/AdbShellTab';
 import { FileManagerTab } from '@/features/adb/FileManagerTab';
+import { AdbSystemInfoTab } from '@/features/adb/AdbSystemInfoTab';
 
 /**
  * The Apps view is rendered inside its own OS-level window (see
@@ -26,6 +27,57 @@ export function AppsView() {
   const serial = searchParams.get('serial');
   const [installing, setInstalling] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
+
+  // System info cache lives in the parent so the user can switch away
+  // to the Apps / Files / Shell tabs and back without re-fetching ~20
+  // adb shell calls. The cache is keyed on `serial`: a different
+  // device triggers a fresh fetch.
+  const [systemInfo, setSystemInfo] = useState<DeviceSystemInfo | null>(null);
+  const [systemInfoLoading, setSystemInfoLoading] = useState(false);
+  const [systemInfoError, setSystemInfoError] = useState<string | null>(null);
+  const [systemInfoUpdated, setSystemInfoUpdated] = useState<number | null>(null);
+
+  // Monotonic request counter. Each refresh captures its own id; if
+  // a newer refresh starts before this one resolves we discard the
+  // stale result so a slow first fetch can't clobber a fast second one.
+  const requestIdRef = useRef(0);
+  const refreshSystemInfo = useCallback(async () => {
+    if (!serial) return;
+    const myId = ++requestIdRef.current;
+    setSystemInfoLoading(true);
+    // Clear stale error so a previous failure doesn't sit next to the
+    // new "loading" state during the in-flight refresh.
+    setSystemInfoError(null);
+    try {
+      const data = await adbSystemInfo(serial);
+      if (myId !== requestIdRef.current) return; // stale
+      setSystemInfo(data);
+      setSystemInfoUpdated(Date.now());
+    } catch (e) {
+      if (myId !== requestIdRef.current) return; // stale
+      setSystemInfoError(String(e));
+    } finally {
+      if (myId === requestIdRef.current) {
+        setSystemInfoLoading(false);
+      }
+    }
+  }, [serial]);
+
+  // Drop the cache when the device serial changes so the next mount of
+  // the System tab shows fresh data instead of the previous device's.
+  // Bump the request counter so any in-flight fetch for the OLD
+  // serial won't write into the NEW serial's state.
+  useEffect(() => {
+    requestIdRef.current += 1;
+    setSystemInfo(null);
+    setSystemInfoError(null);
+    setSystemInfoUpdated(null);
+    setSystemInfoLoading(false);
+    if (serial) void refreshSystemInfo();
+    // refreshSystemInfo intentionally omitted from deps — it's
+    // referentially stable via useCallback([serial]).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [serial]);
 
   async function installApks() {
     if (!serial || installing) return;
@@ -81,12 +133,23 @@ export function AppsView() {
       </header>
 
       <main className="flex-1 overflow-auto p-6">
-        <Tabs defaultValue="apps">
+        <Tabs defaultValue="system">
           <TabsList>
+            <TabsTrigger value="system">{t('adb.systemTab')}</TabsTrigger>
             <TabsTrigger value="apps">{t('adb.appsTab')}</TabsTrigger>
             <TabsTrigger value="files">{t('adb.filesTab')}</TabsTrigger>
             <TabsTrigger value="shell">{t('adb.shellTab')}</TabsTrigger>
           </TabsList>
+          <TabsContent value="system">
+            <AdbSystemInfoTab
+              serial={serial}
+              info={systemInfo}
+              loading={systemInfoLoading}
+              error={systemInfoError}
+              lastUpdated={systemInfoUpdated}
+              onRefresh={() => void refreshSystemInfo()}
+            />
+          </TabsContent>
           <TabsContent value="apps">
             <AdbAppsTab key={`${serial}-${refreshKey}`} serial={serial} />
           </TabsContent>

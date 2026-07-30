@@ -88,6 +88,7 @@ pub fn run() {
             commands::adb::push_file,
             commands::adb::pull_file,
             commands::adb::is_device_rooted,
+            commands::adb::adb_system_info,
         ])
         .setup(|_app| {
             log::info!("JADB started");

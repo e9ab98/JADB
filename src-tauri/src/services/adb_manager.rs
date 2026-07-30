@@ -2,6 +2,7 @@ use crate::config::settings::Settings;
 use crate::error::{AppError, AppResult};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
+use super::adb_dumpsys;
 use std::process::Stdio;
 use tauri::{AppHandle, Manager};
 use tokio::process::Command;
@@ -188,7 +189,7 @@ async fn run_adb(settings: &Settings, serial: Option<&str>, args: &[&str]) -> Ap
 }
 
 /// Run an `adb shell ...` command and return its stdout.
-async fn run_adb_shell(
+pub(crate) async fn run_adb_shell(
     settings: &Settings,
     serial: &str,
     shell_args: &[&str],
@@ -702,6 +703,1248 @@ pub async fn shell_exec(
         exit_code: output.status.code().unwrap_or(-1),
         command: command.to_string(),
     })
+}
+
+/// One immutable piece of device metadata surfaced in the "System Info"
+/// tab. All fields are optional because each comes from a separate `adb
+/// shell` call that may fail (e.g. permission denied on `dumpsys
+/// battery`, missing `wm` helper on old Android, etc).
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceSystemInfo {
+    // 硬件 / Hardware
+    pub manufacturer: Option<String>,
+    pub brand: Option<String>,
+    pub model: Option<String>,
+    pub device: Option<String>,
+    pub hardware: Option<String>,
+    pub platform: Option<String>,
+    pub serial: Option<String>,
+    pub bootloader: Option<String>,
+    pub fingerprint: Option<String>,
+
+    // 屏幕 / Display
+    pub screen_size: Option<String>,
+    pub screen_density: Option<String>,
+    pub screen_refresh_rate: Option<String>,
+    pub physical_size: Option<String>,
+    pub rotation: Option<String>,
+
+    // 系统 / System
+    pub android_release: Option<String>,
+    pub android_sdk: Option<String>,
+    pub security_patch: Option<String>,
+    pub build_id: Option<String>,
+    pub build_type: Option<String>,
+    pub kernel_version: Option<String>,
+    pub java_vm: Option<String>,
+    pub abi: Option<String>,
+    pub abi_list: Option<String>,
+
+    // CPU
+    pub cpu_abi: Option<String>,
+    pub cpu_cores: Option<String>,
+    pub cpu_hardware: Option<String>,
+    pub cpu_max_freq: Option<String>,
+    pub cpu_features: Option<String>,
+
+    // GPU / 图形处理器
+    pub gpu_vendor: Option<String>,
+    pub gpu_renderer: Option<String>,
+    pub gpu_opengles_version: Option<String>,
+    pub gpu_vulkan_version: Option<String>,
+    pub gpu_driver: Option<String>,
+
+    // 内存 / Memory
+    pub ram_total: Option<String>,
+    pub ram_available: Option<String>,
+
+    // 存储 / Storage
+    pub storage_total: Option<String>,
+    pub storage_available: Option<String>,
+
+    // 网络 / Network
+    pub wifi_ssid: Option<String>,
+    pub wifi_ip: Option<String>,
+    pub wifi_signal: Option<String>,
+    pub wifi_link_speed: Option<String>,
+    pub wifi_frequency: Option<String>,
+    pub network_type: Option<String>,
+    pub operator: Option<String>,
+    pub airplane_mode: Option<String>,
+    pub ipv4: Option<String>,
+
+    // 运行时 / Runtime
+    pub uptime: Option<String>,
+    pub boot_time: Option<String>,
+    pub selinux: Option<String>,
+    pub timezone: Option<String>,
+    pub locale: Option<String>,
+    pub foreground_app: Option<String>,
+    pub screen_state: Option<String>,
+
+    // 电量 / Battery
+    pub battery_level: Option<String>,
+    pub battery_status: Option<String>,
+    pub battery_health: Option<String>,
+    pub battery_temp: Option<String>,
+    pub battery_voltage: Option<String>,
+    pub battery_technology: Option<String>,
+    pub battery_plugged: Option<String>,
+}
+
+/// Decode the `ro.opengles.version` value into a "major.minor"
+/// string. The prop is documented as hex BCD (e.g. `0x00030002` for
+/// ES 3.2), but some ROMs return the raw decimal instead (e.g.
+/// `196610` for the same 3.2). Accept either form.
+fn parse_opengles_hex(s: &str) -> Option<String> {
+    let s = s.trim();
+    let n = if let Some(rest) = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
+        u32::from_str_radix(rest, 16).ok()?
+    } else {
+        // Fallback: bare decimal. The Android documented form is hex,
+        // but getprop on some OEM ROMs normalises it to decimal.
+        s.parse::<u32>().ok()?
+    };
+    let major = ((n >> 16) & 0xFFFF) as u32;
+    let minor = (n & 0xFFFF) as u32;
+    if major == 0 && minor == 0 {
+        return None;
+    }
+    Some(format!("{}.{}", major, minor))
+}
+
+/// Known GPU vendor names. Used to disambiguate `ro.hardware.egl` /
+/// similar getprop values that some ROMs set to the GPU model name
+/// (e.g. "adreno") instead of the company name ("Qualcomm"). All
+/// comparisons are lower-cased.
+const KNOWN_GPU_VENDORS: &[&str] = &[
+    "qualcomm",
+    "arm",
+    "imagination",
+    "nvidia",
+    "intel",
+    "apple",
+    "broadcom",
+    "samsung",
+    "mediatek",
+    "hisilicon",
+    "amlogic",
+    "rockchip",
+    "allwinner",
+    "verisilicon",
+];
+
+/// Known GPU model / family keywords. If a getprop value contains
+/// any of these, it's almost certainly a model name (like "Adreno
+/// 740") rather than a vendor or a version number.
+const GPU_MODEL_KEYWORDS: &[&str] = &[
+    "adreno",
+    "mali",
+    "powervr",
+    "tegra",
+    "videocore",
+    "xclipse",
+    "radeon",
+    "iris xe",
+    "iris plus",
+    "uhd graphics",
+    "hd graphics",
+    "apple gpu",
+];
+
+/// Classify an ambiguous GPU-related string as a vendor, a model, or
+/// unknown. Used by the fallback layer to decide whether a getprop
+/// value should populate `gpu_vendor` or `gpu_renderer`.
+///
+/// Model keywords are checked first because model names are more
+/// specific (e.g. "Intel(R) UHD Graphics 770" or "Apple GPU" both
+/// mention a vendor keyword AND carry a model-family keyword — the
+/// model classification is the more useful one in that case, since
+/// `ro.hardware.egl` on Xiaomi / HyperOS-style ROMs is set to the
+/// model name).
+fn classify_gpu_value(s: &str) -> GpuValueKind {
+    let lower = s.to_lowercase();
+    if GPU_MODEL_KEYWORDS.iter().any(|k| lower.contains(k)) {
+        GpuValueKind::Model
+    } else if KNOWN_GPU_VENDORS.iter().any(|v| lower.contains(v)) {
+        GpuValueKind::Vendor
+    } else {
+        GpuValueKind::Unknown
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum GpuValueKind {
+    Vendor,
+    Model,
+    Unknown,
+}
+
+/// True if the string plausibly looks like a version like "1.3.0" or
+/// "0.8". Used to filter `ro.hardware.vulkan` etc. which on some
+/// devices holds the GPU model name instead.
+fn looks_like_version(s: &str) -> bool {
+    let t = s.trim();
+    if t.is_empty() || t.len() > 30 {
+        return false;
+    }
+    if !t.chars().any(|c| c.is_ascii_digit()) {
+        return false;
+    }
+    let lower = t.to_lowercase();
+    if GPU_MODEL_KEYWORDS.iter().any(|k| lower.contains(k)) {
+        return false;
+    }
+    if KNOWN_GPU_VENDORS.iter().any(|v| lower.contains(v)) {
+        return false;
+    }
+    true
+}
+
+/// Map a known GPU model / family keyword in the renderer string to
+/// its vendor. Returns `None` when the renderer doesn't carry any
+/// recognizable family tag.
+fn derive_vendor_from_renderer(r: &str) -> Option<String> {
+    let lower = r.to_lowercase();
+    if lower.contains("adreno") {
+        Some("Qualcomm".into())
+    } else if lower.contains("mali") {
+        Some("ARM".into())
+    } else if lower.contains("powervr") {
+        Some("Imagination".into())
+    } else if lower.contains("tegra") || lower.contains("nvidia") {
+        Some("NVIDIA".into())
+    } else if lower.contains("apple") {
+        Some("Apple".into())
+    } else if lower.contains("intel")
+        || lower.contains("uhd")
+        || lower.contains("iris")
+        || lower.contains("hd graphics")
+    {
+        Some("Intel".into())
+    } else if lower.contains("broadcom") || lower.contains("videocore") {
+        Some("Broadcom".into())
+    } else if lower.contains("amd") || lower.contains("radeon") {
+        Some("AMD".into())
+    } else if lower.contains("samsung") || lower.contains("xclipse") {
+        Some("Samsung".into())
+    } else if lower.contains("mediatek") {
+        Some("MediaTek".into())
+    } else {
+        None
+    }
+}
+
+/// Lightweight byte formatter used by the system info section (kept here
+/// to avoid pulling a new util module). Input is bytes; output uses KB /
+/// MB / GB with one decimal place.
+fn format_bytes(bytes: u64) -> String {
+    const KB: u64 = 1024;
+    const MB: u64 = KB * 1024;
+    const GB: u64 = MB * 1024;
+    if bytes >= GB {
+        format!("{:.2} GB", bytes as f64 / GB as f64)
+    } else if bytes >= MB {
+        format!("{:.2} MB", bytes as f64 / MB as f64)
+    } else if bytes >= KB {
+        format!("{:.1} KB", bytes as f64 / KB as f64)
+    } else {
+        format!("{} B", bytes)
+    }
+}
+
+/// Parse the output of `uptime` (or `cat /proc/uptime`) into a
+/// zh-friendly string like "3 天 5 小时 12 分" / "5 小时 12 分" /
+/// "12 分 30 秒". `raw` may be the full multi-line `uptime` output or
+/// just a number-of-seconds float from `/proc/uptime`.
+fn parse_uptime(raw: &str) -> Option<String> {
+    // Common `uptime` formats:
+    //   "10:16:11 up 5 days, 3:45, 1 user, ..."
+    //   "10:16:11 up 3:45, ..."
+    //   "10:16:11 up 12 mins, ..."
+    //   "10:16:11 up 30 sec, ..."
+    let lower = raw.to_lowercase();
+    let idx = lower.find("up ")?;
+    let after = &raw[idx + 3..];
+    // `uptime` prints at most two segments separated by a comma:
+    //   "5 days, 3:45"   -> ["5 days", " 3:45"]
+    //   "3:45"           -> ["3:45"]
+    //   "12 mins"        -> ["12 mins"]
+    let first_chunk: String = after
+        .chars()
+        .take_while(|c| *c != ',' && *c != '\n')
+        .collect();
+    let rest = &after[first_chunk.len()..];
+    let second_chunk: String = if rest.starts_with(',') {
+        rest[1..]
+            .chars()
+            .take_while(|c| *c != ',' && *c != '\n')
+            .collect()
+    } else {
+        String::new()
+    };
+    let mut days: u64 = 0;
+    let mut hours: u64 = 0;
+    let mut mins: u64 = 0;
+    let mut secs: u64 = 0;
+    for seg in [first_chunk.as_str(), second_chunk.as_str()] {
+        let seg = seg.trim();
+        if seg.is_empty() {
+            continue;
+        }
+        if let Some(rest) = seg.strip_suffix("days") {
+            days = rest.trim().parse().unwrap_or(0);
+        } else if let Some(rest) = seg.strip_suffix("day") {
+            days = rest.trim().parse().unwrap_or(0);
+        } else if let Some(rest) = seg.strip_suffix("mins") {
+            mins = rest.trim().parse().unwrap_or(0);
+        } else if let Some(rest) = seg.strip_suffix("min") {
+            mins = rest.trim().parse().unwrap_or(0);
+        } else if let Some(rest) = seg.strip_suffix("secs") {
+            secs = rest.trim().parse().unwrap_or(0);
+        } else if let Some(rest) = seg.strip_suffix("sec") {
+            secs = rest.trim().parse().unwrap_or(0);
+        } else if seg.contains(':') {
+            // "H:MM" / "HH:MM" / "HH:MM:SS"
+            let parts: Vec<&str> = seg.split(':').collect();
+            if parts.len() == 2 {
+                hours = parts[0].trim().parse().unwrap_or(0);
+                mins = parts[1].trim().parse().unwrap_or(0);
+            } else if parts.len() == 3 {
+                hours = parts[0].trim().parse().unwrap_or(0);
+                mins = parts[1].trim().parse().unwrap_or(0);
+                secs = parts[2].trim().parse().unwrap_or(0);
+            }
+        }
+    }
+    Some(format_uptime_parts(days, hours, mins, secs))
+}
+fn format_uptime(secs: u64) -> String {
+    let days = secs / 86_400;
+    let hours = (secs % 86_400) / 3_600;
+    let mins = (secs % 3_600) / 60;
+    let seconds = secs % 60;
+    format_uptime_parts(days, hours, mins, seconds)
+}
+
+fn format_uptime_parts(days: u64, hours: u64, mins: u64, secs: u64) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    if days > 0 {
+        parts.push(format!("{} 天", days));
+    }
+    if hours > 0 || days > 0 {
+        parts.push(format!("{} 小时", hours));
+    }
+    if mins > 0 || (days == 0 && hours == 0) {
+        parts.push(format!("{} 分", mins));
+    }
+    if days == 0 && hours == 0 && mins < 5 {
+        // Show seconds only for very fresh boots (<5 min) so users
+        // can tell "just rebooted" from "up for 4 min".
+        parts.push(format!("{} 秒", secs));
+    }
+    parts.join(" ")
+}
+
+/// Decode a VK_MAKE_VERSION-encoded integer (or hex string) into
+/// "major.minor.patch". Vulkan encodes version as
+/// `(major << 22) | (minor << 12) | patch`. The Android system surfaces
+/// this through `pm list features` like
+/// `feature:android.hardware.vulkan.version=0x00400303`. Returns
+/// `None` if the input can't be parsed so the caller can decide what
+/// to do (we surface the raw value as a fallback).
+fn decode_vulkan_version(raw: &str) -> Option<String> {
+    let s = raw.trim();
+    let n: u32 = if let Some(rest) = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
+        u32::from_str_radix(rest, 16).ok()?
+    } else {
+        s.parse::<u32>().ok()?
+    };
+    // Vulkan allows major up to 127, minor up to 1023, patch up to 4095.
+    let major = (n >> 22) & 0x7F;
+    let minor = (n >> 12) & 0x3FF;
+    let patch = n & 0xFFF;
+    if major == 0 && minor == 0 && patch == 0 {
+        return None;
+    }
+    Some(format!("{}.{}.{}", major, minor, patch))
+}
+
+/// Decode `dumpsys battery` `status` field. Input can be either the
+/// raw enum name (`CHARGING`, `DISCHARGING`, `FULL`) or the
+/// human-readable tuple (`2 (CHARGING)`). Returns a zh label.
+fn decode_battery_status(s: &str) -> String {
+    let upper = s.to_uppercase();
+    let code = upper
+        .chars()
+        .take_while(|c| c.is_ascii_digit())
+        .collect::<String>();
+    if !code.is_empty() {
+        return match code.as_str() {
+            "1" => "未知",
+            "2" => "充电中",
+            "3" => "放电中",
+            "4" => "未充电",
+            "5" => "已充满",
+            "6" => "已充满(测试)",
+            _ => s,
+        }
+        .to_string();
+    }
+    if upper.contains("CHARGING") {
+        return "充电中".to_string();
+    }
+    if upper.contains("DISCHARGING") {
+        return "放电中".to_string();
+    }
+    if upper.contains("FULL") {
+        return "已充满".to_string();
+    }
+    if upper.contains("NOT CHARGING") {
+        return "未充电".to_string();
+    }
+    s.to_string()
+}
+
+/// Decode `dumpsys battery` `health` field. Common values:
+///   1=Unknown 2=Good 3=Overheat 4=Dead 5=Over voltage
+///   6=Unspecified failure 7=Cold
+fn decode_battery_health(s: &str) -> String {
+    let upper = s.to_uppercase();
+    let code = upper
+        .chars()
+        .take_while(|c| c.is_ascii_digit())
+        .collect::<String>();
+    if !code.is_empty() {
+        return match code.as_str() {
+            "1" => "未知",
+            "2" => "良好",
+            "3" => "过热",
+            "4" => "损坏",
+            "5" => "过压",
+            "6" => "未指定故障",
+            "7" => "过冷",
+            _ => s,
+        }
+        .to_string();
+    }
+    if upper.contains("GOOD") {
+        return "良好".to_string();
+    }
+    if upper.contains("OVERHEAT") {
+        return "过热".to_string();
+    }
+    if upper.contains("DEAD") {
+        return "损坏".to_string();
+    }
+    if upper.contains("COLD") {
+        return "过冷".to_string();
+    }
+    s.to_string()
+}
+
+/// Convert a unix timestamp (seconds) to a local-time string like
+/// "2026-07-30 10:16:11". We use the host's local TZ because the
+/// device clock is the same one users see in their screenshots.
+fn format_boot_time(ts: i64) -> Option<String> {
+    use std::time::{Duration, UNIX_EPOCH};
+    let dt = UNIX_EPOCH.checked_add(Duration::from_secs(ts as u64))?;
+    // chrono is in Cargo.toml — use it instead of hand-rolling.
+    let datetime = chrono::DateTime::<chrono::Local>::from(dt);
+    Some(datetime.format("%Y-%m-%d %H:%M:%S").to_string())
+}
+
+/// Collect a one-shot snapshot of device metadata for the System Info
+/// tab. Each section is queried with a separate `adb shell` call so a
+/// single failure (e.g. locked SIM, no battery service on emulator)
+/// only blanks out that section, not the whole snapshot.
+///
+/// Performance: ~20 adb roundtrips at ~50ms each ≈ 1s wall-clock on a
+/// healthy USB connection. Acceptable for an on-demand refresh.
+pub async fn system_info(
+    settings: &Settings,
+    device: &str,
+) -> AppResult<DeviceSystemInfo> {
+    let mut info = DeviceSystemInfo::default();
+
+    // --- 硬件 ---------------------------------------------------------
+    info.manufacturer = adb_dumpsys::prop_or_none(settings, device, "ro.product.manufacturer").await;
+    info.brand = adb_dumpsys::prop_or_none(settings, device, "ro.product.brand").await;
+    info.model = adb_dumpsys::prop_or_none(settings, device, "ro.product.model").await;
+    info.device = adb_dumpsys::prop_or_none(settings, device, "ro.product.device").await;
+    info.hardware = adb_dumpsys::prop_or_none(settings, device, "ro.hardware").await;
+    info.platform = adb_dumpsys::prop_or_none(settings, device, "ro.board.platform").await;
+    info.serial = adb_dumpsys::prop_or_none(settings, device, "ro.serialno").await;
+    info.bootloader = adb_dumpsys::prop_or_none(settings, device, "ro.bootloader")
+        .await
+        .or_else(|| {
+            // Older or OEM ROMs (e.g. some Xiaomi builds) only expose
+            // `ro.boot.bootloader`. Fall back so we don't lose this field.
+            None
+        });
+    if info.bootloader.is_none() {
+        info.bootloader = adb_dumpsys::prop_or_none(settings, device, "ro.boot.bootloader").await;
+    }
+    info.fingerprint = adb_dumpsys::prop_or_none(settings, device, "ro.build.fingerprint").await;
+
+    // --- 屏幕 ---------------------------------------------------------
+    if let Ok(out) = run_adb_shell(settings, device, &["wm", "size"]).await {
+        // "Physical size: 1080x2400" / "Override size: ..."
+        for line in out.lines() {
+            if let Some(rest) = line.split(':').nth(1) {
+                let s = rest.trim().to_string();
+                if s.contains('x') {
+                    info.screen_size = Some(s);
+                    break;
+                }
+            }
+        }
+    }
+    if let Ok(out) = run_adb_shell(settings, device, &["wm", "density"]).await {
+        for line in out.lines() {
+            if let Some(rest) = line.split(':').nth(1) {
+                info.screen_density = Some(rest.trim().to_string());
+                break;
+            }
+        }
+    }
+    // Prefer the kernel-level property (most reliable across OEM ROMs).
+    if info.screen_refresh_rate.is_none() {
+        if let Some(rate) = adb_dumpsys::prop_or_none(settings, device, "persist.sys.ui.refresh_rate").await {
+            info.screen_refresh_rate = Some(rate);
+        }
+    }
+    if info.screen_refresh_rate.is_none() {
+        if let Some(rate) = adb_dumpsys::prop_or_none(settings, device, "ro.surface_flinger.refresh_rate").await {
+            info.screen_refresh_rate = Some(rate);
+        }
+    }
+    if info.screen_refresh_rate.is_none() {
+        if let Ok(out) = run_adb_shell(settings, device, &["dumpsys", "display"]).await {
+            for line in out.lines() {
+                let l = line.trim();
+                if l.starts_with("mDefaultRefreshRate=")
+                    || l.starts_with("refreshRate=")
+                    || l.starts_with("mActiveRefreshRate=")
+                {
+                    info.screen_refresh_rate = Some(l.to_string());
+                }
+            }
+        }
+    }
+    if let Ok(out) = run_adb_shell(
+        settings,
+        device,
+        &["settings", "get", "system", "user_rotation"],
+    )
+    .await
+    {
+        let t = out.trim().to_string();
+        if !t.is_empty() {
+            info.rotation = Some(t);
+        }
+    }
+    // Compute approximate physical screen size from size + density.
+    if let (Some(size), Some(density)) = (&info.screen_size, &info.screen_density) {
+        let parse_first = |s: &str| -> Option<f64> { s.trim().parse::<f64>().ok() };
+        if let Some((w_str, h_str)) = size.split_once('x') {
+            if let (Some(w), Some(h)) = (parse_first(w_str), parse_first(h_str)) {
+                if let Ok(dpi) = density.trim().parse::<f64>() {
+                    if dpi > 0.0 {
+                        let diag = ((w * w + h * h) as f64).sqrt() / dpi;
+                        info.physical_size = Some(format!("{:.2} inch", diag));
+                    }
+                }
+            }
+        }
+    }
+
+    // --- 系统 ---------------------------------------------------------
+    info.android_release = adb_dumpsys::prop_or_none(settings, device, "ro.build.version.release").await;
+    info.android_sdk = adb_dumpsys::prop_or_none(settings, device, "ro.build.version.sdk").await;
+    info.security_patch = adb_dumpsys::prop_or_none(settings, device, "ro.build.version.security_patch").await;
+    info.build_id = adb_dumpsys::prop_or_none(settings, device, "ro.build.id").await;
+    info.build_type = adb_dumpsys::prop_or_none(settings, device, "ro.build.type").await;
+    info.abi = adb_dumpsys::prop_or_none(settings, device, "ro.product.cpu.abi").await;
+    info.abi_list = adb_dumpsys::prop_or_none(settings, device, "ro.product.cpu.abilist").await;
+    info.java_vm = adb_dumpsys::prop_or_none(settings, device, "ro.java.vm.version")
+        .await
+        .or_else(|| {
+            // Newer Android / OEM ROMs sometimes only set dalvik.vm.version.
+            None
+        });
+    if info.java_vm.is_none() {
+        info.java_vm = adb_dumpsys::prop_or_none(settings, device, "dalvik.vm.version").await;
+    }
+    if info.java_vm.is_none() {
+        info.java_vm = adb_dumpsys::prop_or_none(settings, device, "ro.dalvik.vm.version").await;
+    }
+    if let Ok(out) = run_adb_shell(settings, device, &["uname", "-r"]).await {
+        let t = out.trim().to_string();
+        if !t.is_empty() {
+            info.kernel_version = Some(t);
+        }
+    }
+
+    // --- CPU ----------------------------------------------------------
+    info.cpu_abi = info.abi.clone();
+    if info.cpu_hardware.is_none() {
+        if let Ok(out) = run_adb_shell(settings, device, &["getprop", "ro.product.board"]).await {
+            let t = out.trim().to_string();
+            if !t.is_empty() {
+                info.cpu_hardware = Some(t);
+            }
+        }
+    }
+    if info.cpu_hardware.is_none() {
+        if let Ok(out) = run_adb_shell(settings, device, &["getprop", "ro.hardware"]).await {
+            let t = out.trim().to_string();
+            if !t.is_empty() {
+                info.cpu_hardware = Some(t);
+            }
+        }
+    }
+    if let Ok(out) = run_adb_shell(settings, device, &["nproc"]).await {
+        let t = out.trim().to_string();
+        if !t.is_empty() {
+            info.cpu_cores = Some(t);
+        }
+    }
+    // /proc/cpuinfo for Hardware + Features (skip "model name" duplicates)
+    if let Ok(out) = run_adb_shell(settings, device, &["cat", "/proc/cpuinfo"]).await {
+        for line in out.lines() {
+            let lower = line.to_lowercase();
+            if info.cpu_hardware.is_none() && lower.starts_with("hardware") {
+                let v = line.split(':').nth(1).unwrap_or("").trim().to_string();
+                if !v.is_empty() {
+                    info.cpu_hardware = Some(v);
+                }
+            } else if info.cpu_features.is_none() && lower.starts_with("features") {
+                let v = line.split(':').nth(1).unwrap_or("").trim().to_string();
+                if !v.is_empty() {
+                    info.cpu_features = Some(v);
+                }
+            }
+        }
+    }
+    if let Ok(out) = run_adb_shell(
+        settings,
+        device,
+        &["cat", "/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq"],
+    )
+    .await
+    {
+        if let Ok(khz) = out.trim().parse::<f64>() {
+            let ghz = khz / 1_000_000.0;
+            info.cpu_max_freq = Some(format!("{:.2} GHz", ghz));
+        }
+    }
+
+    // --- GPU / Graphics ------------------------------------------------
+    // Most reliable source for GPU on Android is `dumpsys SurfaceFlinger`,
+    // which always lists the active GLES / Vulkan renderer regardless of
+    // whether the app has rendered anything yet. We parse line-by-line
+    // because the output is heterogeneous across vendors.
+    if let Ok(out) =
+        run_adb_shell(settings, device, &["dumpsys", "SurfaceFlinger"]).await
+    {
+        for line in out.lines() {
+            let trimmed = line.trim();
+            if info.gpu_vendor.is_none() {
+                if let Some(rest) = trimmed
+                    .strip_prefix("GLES vendor:")
+                    .or_else(|| trimmed.strip_prefix("EGL vendor:"))
+                    .or_else(|| trimmed.strip_prefix("Vulkan vendor:"))
+                {
+                    let v = rest.trim().to_string();
+                    if !v.is_empty() {
+                        info.gpu_vendor = Some(v);
+                    }
+                }
+            }
+            if info.gpu_renderer.is_none() {
+                if let Some(rest) = trimmed
+                    .strip_prefix("GLES renderer:")
+                    .or_else(|| trimmed.strip_prefix("EGL renderer:"))
+                    .or_else(|| trimmed.strip_prefix("Vulkan device:"))
+                    .or_else(|| trimmed.strip_prefix("Vulkan renderer:"))
+                {
+                    let v = rest.trim().to_string();
+                    if !v.is_empty() {
+                        info.gpu_renderer = Some(v);
+                    }
+                }
+            }
+            if info.gpu_opengles_version.is_none() {
+                if let Some(rest) = trimmed
+                    .strip_prefix("GLES version:")
+                    .or_else(|| trimmed.strip_prefix("EGL version:"))
+                {
+                    let raw = rest.trim();
+                    if !raw.is_empty() {
+                        // SurfaceFlinger prints e.g.
+                        //   "OpenGL ES 3.2 V@415.0 (GIT@abc, ...)"
+                        // We want just "OpenGL ES 3.2" for the user.
+                        let compact = if let Some(idx) = raw.find(" V@") {
+                            raw[..idx].trim().to_string()
+                        } else {
+                            // Take the first 3 whitespace-separated tokens
+                            // (e.g. "OpenGL ES 3.2").
+                            raw.split_whitespace()
+                                .take(3)
+                                .collect::<Vec<_>>()
+                                .join(" ")
+                        };
+                        if !compact.is_empty() {
+                            info.gpu_opengles_version = Some(compact);
+                        }
+                    }
+                }
+            }
+            if info.gpu_vulkan_version.is_none() {
+                if let Some(rest) = trimmed
+                    .strip_prefix("Vulkan version:")
+                    .or_else(|| trimmed.strip_prefix("Vulkan API version:"))
+                {
+                    let v = rest.trim().to_string();
+                    if !v.is_empty() {
+                        info.gpu_vulkan_version = Some(v);
+                    }
+                }
+            }
+        }
+    }
+    // Fallbacks for older / OEM ROMs that don't include GPU lines in
+    // SurfaceFlinger. Different ROMs populate the getprops differently:
+    //
+    //   * `ro.hardware.egl` is documented as the EGL vendor name
+    //     (e.g. "Qualcomm") but Xiaomi / some HyperOS builds put the
+    //     GPU model name there ("adreno"). We classify the value with
+    //     `classify_gpu_value` and route it to vendor vs. renderer.
+    //   * `ro.hardware.vulkan` is documented as the Vulkan version
+    //     (e.g. "1.3.0") but some devices put the GPU model there
+    //     instead. We only accept values that look like a version.
+    //   * `ro.vulkan.version` (newer prop name) is the preferred
+    //     Vulkan version source on Android 12+.
+    if info.gpu_vendor.is_none() || info.gpu_renderer.is_none() {
+        if let Some(v) =
+            adb_dumpsys::prop_or_none(settings, device, "ro.hardware.egl").await
+        {
+            match classify_gpu_value(&v) {
+                GpuValueKind::Vendor => {
+                    if info.gpu_vendor.is_none() {
+                        info.gpu_vendor = Some(v);
+                    }
+                }
+                GpuValueKind::Model => {
+                    if info.gpu_renderer.is_none() {
+                        info.gpu_renderer = Some(v);
+                    }
+                }
+                GpuValueKind::Unknown => {
+                    // Prefer the renderer slot — unknown values are
+                    // more likely to be a model description than a
+                    // vendor name (vendor names are well-known).
+                    if info.gpu_renderer.is_none() {
+                        info.gpu_renderer = Some(v);
+                    } else if info.gpu_vendor.is_none() {
+                        info.gpu_vendor = Some(v);
+                    }
+                }
+            }
+        }
+    }
+    // Cross-fill: when we ended up with a renderer but no vendor, the
+    // renderer's model keyword (e.g. "Adreno 740" → "Qualcomm",
+    // "Mali-G78" → "ARM") tells us the vendor.
+    if info.gpu_vendor.is_none() {
+        if let Some(renderer) = info.gpu_renderer.as_deref() {
+            if let Some(v) = derive_vendor_from_renderer(renderer) {
+                info.gpu_vendor = Some(v);
+            }
+        }
+    }
+    // OpenGL ES version. ro.opengles.version is hex-BCD on stock
+    // Android (`0x00030002`) and decimal on some OEM ROMs (`196610`).
+    // `parse_opengles_hex` accepts either; if it can't decode, leave
+    // the field None rather than showing the raw integer.
+    if info.gpu_opengles_version.is_none() {
+        if let Some(v) =
+            adb_dumpsys::prop_or_none(settings, device, "ro.opengles.version").await
+        {
+            if let Some(decoded) = parse_opengles_hex(&v) {
+                info.gpu_opengles_version = Some(decoded);
+            }
+        }
+    }
+    // Vulkan version: prefer ro.vulkan.version (Android 12+) and fall
+    // back to ro.hardware.vulkan. Both are validated as version
+    // strings so we don't paint a model name into the version field.
+    if info.gpu_vulkan_version.is_none() {
+        for prop in &["ro.vulkan.version", "ro.hardware.vulkan"] {
+            if let Some(v) = adb_dumpsys::prop_or_none(settings, device, prop).await {
+                if looks_like_version(&v) {
+                    info.gpu_vulkan_version = Some(v);
+                    break;
+                }
+            }
+        }
+    }
+    // Last-resort Vulkan source: `pm list features` exposes the
+    // device's Vulkan feature manifest on Android 7+. The relevant line
+    // looks like `feature:android.hardware.vulkan.version=0x00400303`
+    // where the value is a VK_MAKE_VERSION-encoded u32. Decode it.
+    if info.gpu_vulkan_version.is_none() {
+        if let Ok(out) = run_adb_shell(settings, device, &["pm", "list", "features"]).await {
+            for line in out.lines() {
+                let trimmed = line.trim();
+                if let Some(rest) =
+                    trimmed.split("android.hardware.vulkan.version=").nth(1)
+                {
+                    let raw = rest.trim();
+                    if let Some(version) = decode_vulkan_version(raw) {
+                        info.gpu_vulkan_version = Some(version);
+                        break;
+                    } else if !raw.is_empty() {
+                        // Unknown format — surface it as-is so the user
+                        // can at least see the raw value.
+                        info.gpu_vulkan_version = Some(raw.to_string());
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    if info.gpu_driver.is_none() {
+        info.gpu_driver =
+            adb_dumpsys::prop_or_none(settings, device, "ro.gfx.driver.0").await;
+    }
+    if info.gpu_driver.is_none() {
+        info.gpu_driver =
+            adb_dumpsys::prop_or_none(settings, device, "ro.hardware.gralloc").await;
+    }
+    if info.gpu_driver.is_none() {
+        info.gpu_driver =
+            adb_dumpsys::prop_or_none(settings, device, "ro.boot.hardware.gralloc").await;
+    }
+    if info.gpu_driver.is_none() {
+        info.gpu_driver =
+            adb_dumpsys::prop_or_none(settings, device, "ro.hardware.hwcomposer").await;
+    }
+    // `dumpsys SurfaceFlinger` always carries a `GLES driver:` line on
+    // Android 10+ that points at the actual EGL driver library. Strip
+    // the directory prefix so the user sees e.g. "libGLESv2_adreno.so"
+    // instead of "/vendor/lib64/egl/libGLESv2_adreno.so".
+    if info.gpu_driver.is_none() {
+        if let Ok(out) =
+            run_adb_shell(settings, device, &["dumpsys", "SurfaceFlinger"]).await
+        {
+            for line in out.lines() {
+                let trimmed = line.trim();
+                if let Some(rest) = trimmed
+                    .strip_prefix("GLES driver:")
+                    .or_else(|| trimmed.strip_prefix("EGL driver:"))
+                {
+                    let v = rest.trim();
+                    if !v.is_empty() {
+                        let basename = v.rsplit('/').next().unwrap_or(v);
+                        info.gpu_driver = Some(basename.to_string());
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    // --- 运行时 / Runtime ----------------------------------------------
+    // Uptime: prefer `uptime` (human-readable), fall back to
+    // /proc/uptime (seconds, float). We format both into a zh-friendly
+    // string like "3 天 5 小时 12 分" so the user doesn't have to
+    // parse systemd-style output.
+    if let Ok(out) = run_adb_shell(settings, device, &["uptime"]).await {
+        if let Some(formatted) = parse_uptime(&out) {
+            info.uptime = Some(formatted);
+        }
+    }
+    if info.uptime.is_none() {
+        if let Ok(out) = run_adb_shell(settings, device, &["cat", "/proc/uptime"]).await {
+            if let Some(secs_str) = out.split_whitespace().next() {
+                if let Ok(secs) = secs_str.parse::<u64>() {
+                    info.uptime = Some(format_uptime(secs));
+                }
+            }
+        }
+    }
+    // Boot time: btime line in /proc/stat gives the unix timestamp of
+    // the last boot. Converted to local time on the host (the device
+    // clock is what users see in their screenshots anyway).
+    if let Ok(out) = run_adb_shell(settings, device, &["cat", "/proc/stat"]).await {
+        for line in out.lines() {
+            if let Some(rest) = line.strip_prefix("btime ") {
+                if let Ok(ts) = rest.trim().parse::<i64>() {
+                    if let Some(formatted) = format_boot_time(ts) {
+                        info.boot_time = Some(formatted);
+                    }
+                }
+                break;
+            }
+        }
+    }
+    // SELinux status — getenforce works without root.
+    if let Ok(out) = run_adb_shell(settings, device, &["getenforce"]).await {
+        let t = out.trim().to_string();
+        if !t.is_empty() {
+            info.selinux = Some(t);
+        }
+    }
+    // Timezone — persist.sys.timezone is the standard source.
+    if let Some(v) = adb_dumpsys::prop_or_none(settings, device, "persist.sys.timezone").await {
+        info.timezone = Some(v);
+    }
+    // Locale — try multiple props because the naming changed across
+    // Android versions.
+    if let Some(v) = adb_dumpsys::prop_or_none(settings, device, "persist.sys.locale").await {
+        info.locale = Some(v);
+    }
+    if info.locale.is_none() {
+        if let Some(v) = adb_dumpsys::prop_or_none(settings, device, "ro.product.locale").await {
+            info.locale = Some(v);
+        }
+    }
+    // Foreground app — parse `dumpsys activity activities`. The exact
+    // line varies between Android versions, so we accept three
+    // candidate prefixes.
+    if let Ok(out) =
+        run_adb_shell(settings, device, &["dumpsys", "activity", "activities"]).await
+    {
+        for line in out.lines() {
+            let trimmed = line.trim();
+            for prefix in &[
+                "topResumedActivity=",
+                "mResumedActivity=",
+                "ResumedActivity=",
+            ] {
+                if let Some(rest) = trimmed.strip_prefix(prefix) {
+                    // Layout: ActivityRecord{hash u0 pkg/.cls pid=...}
+                    let after = rest.trim_start_matches("ActivityRecord{");
+                    // take up to the first whitespace or closing brace
+                    let end = after
+                        .find(|c: char| c.is_whitespace() || c == '}')
+                        .unwrap_or(after.len());
+                    let pkg_cls = &after[..end];
+                    if !pkg_cls.is_empty() {
+                        info.foreground_app = Some(pkg_cls.to_string());
+                        break;
+                    }
+                }
+            }
+            if info.foreground_app.is_some() {
+                break;
+            }
+        }
+    }
+    // Screen state — dumpsys power exposes mWakefulness (Awake/Asleep/Dozing).
+    if let Ok(out) = run_adb_shell(settings, device, &["dumpsys", "power"]).await {
+        for line in out.lines() {
+            let trimmed = line.trim();
+            if let Some(rest) = trimmed.strip_prefix("mWakefulness=") {
+                let v = rest.trim().to_string();
+                if !v.is_empty() {
+                    info.screen_state = Some(v);
+                    break;
+                }
+            }
+        }
+    }
+    if info.screen_state.is_none() {
+        if let Ok(out) = run_adb_shell(settings, device, &["dumpsys", "power"]).await {
+            for line in out.lines() {
+                let lower = line.to_lowercase();
+                if lower.starts_with("display power:") {
+                    // "Display Power: state=ON" / "state=OFF"
+                    if let Some(rest) = line.split("state=").nth(1) {
+                        let v = rest.split_whitespace().next().unwrap_or("").to_string();
+                        if !v.is_empty() {
+                            info.screen_state = Some(format!("Display {}", v));
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // --- 内存 / Memory ------------------------------------------------
+    if let Ok(out) = run_adb_shell(settings, device, &["cat", "/proc/meminfo"]).await {
+        let mut total_kb: Option<u64> = None;
+        let mut avail_kb: Option<u64> = None;
+        for line in out.lines() {
+            if line.starts_with("MemTotal:") {
+                total_kb = line.split_whitespace().nth(1).and_then(|v| v.parse().ok());
+            } else if line.starts_with("MemAvailable:") {
+                avail_kb = line.split_whitespace().nth(1).and_then(|v| v.parse().ok());
+            }
+        }
+        if let Some(kb) = total_kb {
+            info.ram_total = Some(format_bytes(kb * 1024));
+        }
+        if let Some(kb) = avail_kb {
+            info.ram_available = Some(format_bytes(kb * 1024));
+        }
+    }
+
+    // --- 存储 / Storage ----------------------------------------------
+    // `df -h /data` may fail on some ROMs (toybox quirks, /data merged
+    // into /) and may also omit the mount column when the argument is
+    // a symlink. Try three strategies in order of reliability.
+    let storage_attempts: [(&[&str],); 3] = [
+        (&["df", "-h", "/data"],),
+        (&["df", "-h"],),
+        (&["df", "-h", "/storage/emulated"],),
+    ];
+    for (cmd,) in storage_attempts.iter() {
+        if let Ok(out) = run_adb_shell(settings, device, cmd).await {
+            for line in out.lines().skip(1) {
+                if let Some((size, avail)) = adb_dumpsys::df_columns(line) {
+                    info.storage_total = Some(size);
+                    info.storage_available = Some(avail);
+                    break;
+                }
+            }
+            if info.storage_total.is_some() {
+                break;
+            }
+        }
+    }
+    // Last-resort: `dumpsys diskstats | head` if df gave us nothing.
+    if info.storage_total.is_none() {
+        if let Ok(out) = run_adb_shell(settings, device, &["dumpsys", "diskstats"]).await {
+            // Look for the first "Data" section entry — most devices print
+            // "Data: free=... max=... size=..." style lines.
+            for line in out.lines() {
+                let l = line.trim();
+                if l.to_lowercase().starts_with("data:") {
+                    // crude parse: try to find "size=" and "free=" pairs
+                    let mut size: Option<String> = None;
+                    let mut avail: Option<String> = None;
+                    for tok in l.split_whitespace() {
+                        if let Some(v) = tok.strip_prefix("size=") {
+                            size = Some(v.trim_end_matches(',').to_string());
+                        } else if let Some(v) = tok.strip_prefix("free=") {
+                            avail = Some(v.trim_end_matches(',').to_string());
+                        }
+                    }
+                    if size.is_some() && avail.is_some() {
+                        info.storage_total = size;
+                        info.storage_available = avail;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    // --- 网络 / Network ----------------------------------------------
+    // WiFi via dumpsys wifi (best-effort text scan). Multiple prefix
+    // variants because OEM ROMs (Xiaomi HyperOS, ColorOS, etc.) format
+    // the connection block differently.
+    if let Ok(out) = run_adb_shell(settings, device, &["dumpsys", "wifi"]).await {
+        if info.wifi_ssid.is_none() {
+            info.wifi_ssid = adb_dumpsys::key_value_block(&out, "SSID");
+        }
+        if info.wifi_signal.is_none() {
+            // Accept either "RSSI: -45" or "mRssi=-45" (HyperOS style).
+            info.wifi_signal = adb_dumpsys::first_match(&out, "RSSI", ':')
+                .or_else(|| adb_dumpsys::first_match(&out, "mRssi", '='));
+        }
+        if info.wifi_link_speed.is_none() {
+            info.wifi_link_speed = adb_dumpsys::first_match(&out, "Link speed", ':')
+                .or_else(|| adb_dumpsys::first_match(&out, "mLinkSpeed", '='));
+        }
+        if info.wifi_frequency.is_none() {
+            info.wifi_frequency = adb_dumpsys::first_match(&out, "Frequency", ':')
+                .or_else(|| adb_dumpsys::first_match(&out, "mFrequency", '='));
+        }
+    }
+    // If dumpsys wifi masked signal/speed under privacy (Android 13+),
+    // try `dumpsys wifi --realtime` first (privileged view) and fall
+    // back to the wpa_supplicant config which is usually unfiltered
+    // (and readable even without location permission).
+    let mut wifi_extra: Option<String> = None;
+    if info.wifi_signal.is_none()
+        || info.wifi_link_speed.is_none()
+        || info.wifi_frequency.is_none()
+    {
+        if let Ok(out) =
+            run_adb_shell(settings, device, &["dumpsys", "wifi", "--realtime"]).await
+        {
+            wifi_extra = Some(out);
+        }
+        if wifi_extra.is_none() {
+            if let Ok(out) = run_adb_shell(
+                settings,
+                device,
+                &["cat", "/data/misc/wifi/wpa_supplicant.conf"],
+            )
+            .await
+            {
+                wifi_extra = Some(out);
+            }
+        }
+    }
+    if let Some(out) = wifi_extra {
+        // wpa_supplicant.conf uses lowercase `ssid="..."`, while
+        // dumpsys wifi --realtime uses uppercase `SSID: "..."`. Both
+        // are handled by `key_value_block`'s case-insensitive match.
+        if info.wifi_ssid.is_none() {
+            info.wifi_ssid = adb_dumpsys::key_value_block(&out, "SSID");
+        }
+        if info.wifi_signal.is_none() {
+            info.wifi_signal = adb_dumpsys::first_match(&out, "RSSI", ':');
+        }
+        if info.wifi_link_speed.is_none() {
+            info.wifi_link_speed = adb_dumpsys::first_match(&out, "Link speed", ':');
+        }
+        if info.wifi_frequency.is_none() {
+            info.wifi_frequency = adb_dumpsys::first_match(&out, "Frequency", ':')
+                .or_else(|| {
+                    adb_dumpsys::first_match(&out, "freq", '=')
+                        .map(|v| format!("{} MHz", v))
+                });
+        }
+    }
+    if let Ok(out) = run_adb_shell(settings, device, &["ip", "-4", "addr", "show", "wlan0"]).await {
+        if let Some(idx) = out.find("inet ") {
+            let rest = &out[idx + 5..];
+            let ip = rest.split_whitespace().next().unwrap_or("").to_string();
+            if !ip.is_empty() {
+                info.wifi_ip = Some(ip.clone());
+                info.ipv4 = Some(ip);
+            }
+        }
+    }
+    // `gsm.operator.alpha` is unreliable on modern Android: usually
+    // empty unless a SIM is active. Try multiple sources and filter
+    // known "empty" placeholders.
+    fn is_real_operator(s: &str) -> bool {
+        let t = s.trim();
+        !t.is_empty() && t != "," && t != "null" && t != "unknown"
+    }
+    if let Some(v) = adb_dumpsys::prop_or_none(settings, device, "gsm.operator.alpha").await {
+        if is_real_operator(&v) {
+            info.operator = Some(v);
+        }
+    }
+    if info.operator.is_none() {
+        if let Some(v) = adb_dumpsys::prop_or_none(settings, device, "ro.csp.operator").await {
+            if is_real_operator(&v) {
+                info.operator = Some(v);
+            }
+        }
+    }
+    if info.operator.is_none() {
+        if let Ok(out) =
+            run_adb_shell(settings, device, &["dumpsys", "telephony.registry"]).await
+        {
+            for line in out.lines() {
+                let trimmed = line.trim();
+                // mSimOperatorAlpha={"foo"} — pull out the quoted value.
+                if let Some(rest) = trimmed.strip_prefix("mSimOperatorAlpha=") {
+                    if let Some(v) = adb_dumpsys::quoted_value(rest) {
+                        if is_real_operator(&v) {
+                            info.operator = Some(v);
+                            break;
+                        }
+                    }
+                }
+                if let Some(rest) = trimmed.strip_prefix("mNetworkOperatorName=") {
+                    if let Some(v) = adb_dumpsys::quoted_value(rest) {
+                        if is_real_operator(&v) {
+                            info.operator = Some(v);
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if info.wifi_ssid.is_some() || info.wifi_ip.is_some() {
+        info.network_type = Some("Wi-Fi".into());
+    } else if let Ok(out) = run_adb_shell(settings, device, &["dumpsys", "connectivity"]).await {
+        if out.contains("MOBILE") {
+            info.network_type = Some("Mobile".into());
+        } else if out.contains("VPN") {
+            info.network_type = Some("VPN".into());
+        } else {
+            info.network_type = Some("Offline".into());
+        }
+    } else {
+        info.network_type = Some("Offline".into());
+    }
+    if let Ok(out) = run_adb_shell(
+        settings,
+        device,
+        &["settings", "get", "global", "airplane_mode_on"],
+    )
+    .await
+    {
+        let t = out.trim().to_string();
+        if !t.is_empty() {
+            info.airplane_mode = Some(if t == "1" { "已开启".into() } else { "已关闭".into() });
+        }
+    }
+
+    // --- 电量 / Battery ----------------------------------------------
+    // `dumpsys battery` output on modern Android is namespaced with
+    // `Battery ` prefix (e.g. `  Battery level: 80`). Earlier versions
+    // used the bare key. Strip the prefix so both work, and normalize
+    // the value type.
+    if let Ok(out) = run_adb_shell(settings, device, &["dumpsys", "battery"]).await {
+        for raw in out.lines() {
+            let trimmed = raw.trim();
+            let stripped = trimmed
+                .strip_prefix("Battery ")
+                .or_else(|| trimmed.strip_prefix("battery "))
+                .unwrap_or(trimmed);
+            let (key, val) = match stripped.split_once(':') {
+                Some(parts) => (parts.0.trim().to_lowercase(), parts.1.trim().to_string()),
+                None => continue,
+            };
+            if val.is_empty() {
+                continue;
+            }
+            match key.as_str() {
+                "level" => info.battery_level = Some(val),
+                // Status / health come through as e.g. "2 (CHARGING)".
+                // Decode the leading code so the UI shows a
+                // human-readable label rather than a tuple.
+                "status" => info.battery_status = Some(decode_battery_status(&val)),
+                "health" => info.battery_health = Some(decode_battery_health(&val)),
+                "temperature" => {
+                    // Raw is tenths of a degree Celsius.
+                    if let Ok(t) = val.parse::<f64>() {
+                        info.battery_temp = Some(format!("{:.1} °C", t / 10.0));
+                    }
+                }
+                "voltage" => info.battery_voltage = Some(val),
+                "technology" => info.battery_technology = Some(val),
+                "plugged" | "ac powered" | "usb powered" | "wireless powered" => {
+                    // Only record `plugged:`; ignore the per-source booleans
+                    // (some OEMs print them but skip `plugged:`).
+                    if key == "plugged" {
+                        info.battery_plugged = Some(val);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    // Last-resort: on some emulators / HyperOS the battery service is
+    // gated. If everything is still empty, surface that gracefully —
+    // we already show `—` per field, no extra fallback possible.
+
+    Ok(info)
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

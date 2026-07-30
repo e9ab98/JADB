@@ -1,6 +1,6 @@
 use crate::config::settings;
 use crate::error::{AppError, AppResult};
-use crate::services::adb_manager::{self, AdbDevice, AppInfo, DirEntry, ExportApksResult, InstallApksResult};
+use crate::services::adb_manager::{self, AdbDevice, AppInfo, DeviceSystemInfo, DirEntry, ExportApksResult, InstallApksResult};
 use tauri::{AppHandle, Manager, State};
 use crate::services::license::{LicenseService, FEATURE_ADB_BATCH_INSTALL};
 
@@ -324,4 +324,18 @@ pub async fn adb_shell(
         .map_err(|e| AppError::Config(e.to_string()))?;
     let s = settings::read(&dir).await?;
     adb_manager::shell_exec(&s, &device, &command).await
+}
+
+
+#[tauri::command]
+pub async fn adb_system_info(
+    app: AppHandle,
+    device: String,
+) -> AppResult<DeviceSystemInfo> {
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| AppError::Config(e.to_string()))?;
+    let s = settings::read(&dir).await?;
+    adb_manager::system_info(&s, &device).await
 }

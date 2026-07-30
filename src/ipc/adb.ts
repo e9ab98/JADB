@@ -239,3 +239,105 @@ export async function pushFile(
     useRoot,
   });
 }
+
+
+/**
+ * One-shot snapshot of device metadata for the System Info tab. Every
+ * field is optional because each comes from a separate `adb shell`
+ * call that may fail (locked SIM, missing battery service on
+ * emulators, etc.). Missing fields should be rendered as em-dashes.
+ */
+export type DeviceSystemInfo = {
+  // 硬件 / Hardware
+  manufacturer?: string | null;
+  brand?: string | null;
+  model?: string | null;
+  device?: string | null;
+  hardware?: string | null;
+  platform?: string | null;
+  serial?: string | null;
+  bootloader?: string | null;
+  fingerprint?: string | null;
+
+  // 屏幕 / Display
+  screenSize?: string | null;
+  screenDensity?: string | null;
+  screenRefreshRate?: string | null;
+  physicalSize?: string | null;
+  rotation?: string | null;
+
+  // 系统 / System
+  androidRelease?: string | null;
+  androidSdk?: string | null;
+  securityPatch?: string | null;
+  buildId?: string | null;
+  buildType?: string | null;
+  kernelVersion?: string | null;
+  javaVm?: string | null;
+  abi?: string | null;
+  abiList?: string | null;
+
+  // CPU
+  cpuAbi?: string | null;
+  cpuCores?: string | null;
+  cpuHardware?: string | null;
+  cpuMaxFreq?: string | null;
+  cpuFeatures?: string | null;
+
+  // GPU / 图形处理器
+  gpuVendor?: string | null;
+  gpuRenderer?: string | null;
+  gpuOpenglesVersion?: string | null;
+  gpuVulkanVersion?: string | null;
+  gpuDriver?: string | null;
+
+  // 内存 / Memory
+  ramTotal?: string | null;
+  ramAvailable?: string | null;
+
+  // 存储 / Storage
+  storageTotal?: string | null;
+  storageAvailable?: string | null;
+
+  // 网络 / Network
+  wifiSsid?: string | null;
+  wifiIp?: string | null;
+  wifiSignal?: string | null;
+  wifiLinkSpeed?: string | null;
+  wifiFrequency?: string | null;
+  networkType?: string | null;
+  operator?: string | null;
+  airplaneMode?: string | null;
+  ipv4?: string | null;
+
+  // 运行时 / Runtime
+  uptime?: string | null;
+  bootTime?: string | null;
+  selinux?: string | null;
+  timezone?: string | null;
+  locale?: string | null;
+  foregroundApp?: string | null;
+  screenState?: string | null;
+
+  // 电量 / Battery
+  batteryLevel?: string | null;
+  batteryStatus?: string | null;
+  batteryHealth?: string | null;
+  batteryTemp?: string | null;
+  batteryVoltage?: string | null;
+  batteryTechnology?: string | null;
+  batteryPlugged?: string | null;
+};
+
+/**
+ * Collect a snapshot of the connected device's hardware / system / screen /
+ * CPU / network / battery metadata. Each section is queried
+ * independently on the backend, so partial failures degrade gracefully —
+ * a missing field should render as a placeholder rather than breaking
+ * the whole tab.
+ */
+export async function adbSystemInfo(
+  device: string,
+): Promise<DeviceSystemInfo> {
+  return invoke<DeviceSystemInfo>('adb_system_info', { device });
+}
