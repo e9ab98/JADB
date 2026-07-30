@@ -362,6 +362,7 @@
     "unknownDevice": "未知设备",
     "errorTitle": "操作失败",
     "appsTab": "应用",
+    "filesTab": "文件",
     "terminalTab": "终端(预留)",
     "comingSoon": "终端 / 文件管理将在后续版本加入。",
     "appsTitle": "应用列表",

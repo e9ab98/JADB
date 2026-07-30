@@ -362,6 +362,7 @@
     "unknownDevice": "Unknown device",
     "errorTitle": "Operation failed",
     "appsTab": "Apps",
+    "filesTab": "Files",
     "terminalTab": "Terminal (coming soon)",
     "comingSoon": "Terminal / file manager will arrive in a later release.",
     "appsTitle": "Installed Apps",

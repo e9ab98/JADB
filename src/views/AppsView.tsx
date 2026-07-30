@@ -11,6 +11,7 @@ import { useLicenseStore } from '@/store/license';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { AdbAppsTab } from '@/features/adb/AdbAppsTab';
 import { AdbShellTab } from '@/features/adb/AdbShellTab';
+import { FileManagerTab } from '@/features/adb/FileManagerTab';
 
 /**
  * The Apps view is rendered inside its own OS-level window (see
@@ -83,10 +84,14 @@ export function AppsView() {
         <Tabs defaultValue="apps">
           <TabsList>
             <TabsTrigger value="apps">{t('adb.appsTab')}</TabsTrigger>
+            <TabsTrigger value="files">{t('adb.filesTab')}</TabsTrigger>
             <TabsTrigger value="shell">{t('adb.shellTab')}</TabsTrigger>
           </TabsList>
           <TabsContent value="apps">
             <AdbAppsTab key={`${serial}-${refreshKey}`} serial={serial} />
+          </TabsContent>
+          <TabsContent value="files">
+            <FileManagerTab key={serial} serial={serial} rootPath="/" />
           </TabsContent>
           <TabsContent value="shell">
             <AdbShellTab key={serial} serial={serial} />
