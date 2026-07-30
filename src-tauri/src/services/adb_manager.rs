@@ -1095,15 +1095,44 @@ pub async fn is_device_rooted(
     settings: &Settings,
     device: &str,
 ) -> AppResult<bool> {
+    // We try four probes in order from cheapest to most device-specific.
+    // Any single one returning uid=0 (or test-keys) is treated as rooted;
+    // failure of a probe is silent so we fall through to the next one.
+    //
+    // 1) ro.build.tags = "test-keys" indicates a userdebug/eng build.
+    //    Most rooted users keep that property and it's free to read.
+    if let Ok(out) = run_adb_shell(settings, device, &["getprop", "ro.build.tags"]).await {
+        if out.contains("test-keys") {
+            return Ok(true);
+        }
+    }
+    // 2) `id` returns uid=0 when the adb shell itself was promoted to
+    //    root (e.g. `adb root` on userdebug builds). Cheap probe.
     if let Ok(out) = run_adb_shell(settings, device, &["id"]).await {
         if out.contains("uid=0") {
             return Ok(true);
         }
     }
-    match run_adb_shell(settings, device, &["su", "-c", "id"]).await {
-        Ok(out) => Ok(out.contains("uid=0")),
-        Err(_) => Ok(false),
+    // 3) `su 0 id` is the modern Magisk 24+ / KernelSU / APatch syntax.
+    //    This is the most reliable on current devices. Older Magisk
+    //    builds reject this form and return an error, in which case we
+    //    fall through to the legacy probe below.
+    if let Ok(out) = run_adb_shell(settings, device, &["su", "0", "id"]).await {
+        if out.contains("uid=0") {
+            return Ok(true);
+        }
     }
+    // 4) `su -c id` is the legacy SuperSU / older Magisk (pre-24) form.
+    //    On Android 11+ device-as-root or Magisk 24+ this typically
+    //    returns `su: not found` / `su: inaccessible` (the su binary
+    //    is masked for the shell user), so the call errors out and we
+    //    do not mistakenly hit the Ok arm with shell-uid output.
+    if let Ok(out) = run_adb_shell(settings, device, &["su", "-c", "id"]).await {
+        if out.contains("uid=0") {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 /// Pull a file from the device to a local path. Mirrors `push_file`'s

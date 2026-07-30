@@ -79,6 +79,11 @@ export function AdbAppsTab({ serial }: Props) {
   const [query, setQuery] = useState('');
   const [loadingList, setLoadingList] = useState(false);
   const [apps, setApps] = useState<Map<string, AppRow>>(new Map());
+  // Stable display order. Locked the moment adbListPackages returns,
+  // so async info/icon fetches can mutate the row data without
+  // reshuffling cards visually (appLabel is null while loading, but
+  // it would otherwise change the sort key and jump entries around).
+  const [order, setOrder] = useState<string[]>([]);
   const [listError, setListError] = useState<string | null>(null);
   const [pendingUninstall, setPendingUninstall] = useState<AppRow | null>(null);
   const [uninstalling, setUninstalling] = useState(false);
@@ -117,9 +122,14 @@ export function AdbAppsTab({ serial }: Props) {
     setListError(null);
     try {
       const list = await adbListPackages(serial, includeSystem);
+      // Lock the visual order before any enrichment waterfall starts.
+      // Locale-aware string compare is fine here because we only sort
+      // once; later updates never re-sort.
+      const sorted = [...list].sort((a, b) => a.localeCompare(b));
+      setOrder(sorted);
       setApps((prev) => {
         const next = new Map<string, AppRow>();
-        for (const pkg of list) {
+        for (const pkg of sorted) {
           const existing = prev.get(pkg);
           next.set(pkg, existing ?? {
             packageName: pkg,
@@ -153,6 +163,7 @@ export function AdbAppsTab({ serial }: Props) {
   // When the device changes, drop everything.
   useEffect(() => {
     setApps(new Map());
+    setOrder([]);
     setQuery('');
     setInfoLoading(new Set());
     inFlightRef.current.clear();
@@ -366,16 +377,17 @@ export function AdbAppsTab({ serial }: Props) {
   }, [serial]);
 
   const filtered = useMemo(() => {
-    const all = Array.from(apps.values());
-    const filteredAll = all
-      .filter((a) => matchesQuery(a, query.trim()))
-      .sort((a, b) => {
-        const la = a.appLabel ?? a.packageName;
-        const lb = b.appLabel ?? b.packageName;
-        return la.localeCompare(lb);
-      });
-    return filteredAll;
-  }, [apps, query]);
+    // Iterate the locked order so async label/icon fetches never
+    // reshuffle the grid. Falls through to packageName matching for
+    // the search box so a half-loaded list is still searchable.
+    const q = query.trim();
+    const out: AppRow[] = [];
+    for (const pkg of order) {
+      const row = apps.get(pkg);
+      if (row && matchesQuery(row, q)) out.push(row);
+    }
+    return out;
+  }, [order, apps, query]);
 
   async function isRooted(s: string): Promise<boolean> {
     if (s in rootStatus) return rootStatus[s] === true;
@@ -665,6 +677,7 @@ export function AdbAppsTab({ serial }: Props) {
         next.delete(pkg);
         return next;
       });
+      setOrder((prev) => prev.filter((p) => p !== pkg));
       setPendingUninstall(null);
     } catch (e) {
       toast.error(String(e));
