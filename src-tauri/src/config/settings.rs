@@ -48,6 +48,13 @@ pub struct Settings {
     /// When set, `install_rule_packs` downloads from here first; falls back to bundled on failure.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rules_download_url: Option<String>,
+    /// Optional URL of a remote JADB license-server. When set, the local
+    /// LicenseService will call `/api/v1/license/verify` on each status
+    /// refresh; a server-side `revoked` will take precedence over the
+    /// local offline signature check. Network failure falls back to the
+    /// existing offline validation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub license_server_url: Option<String>,
     #[serde(default)]
     pub language: Language,
     #[serde(default)]
@@ -104,6 +111,8 @@ pub struct SettingsPatch {
     pub rules_path: Option<Option<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "double_option")]
     pub rules_download_url: Option<Option<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "double_option")]
+    pub license_server_url: Option<Option<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub language: Option<Language>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -122,6 +131,7 @@ impl Settings {
         if let Some(v) = patch.java_dir { self.java_dir = v; }
         if let Some(v) = patch.rules_path { self.rules_path = v; }
         if let Some(v) = patch.rules_download_url { self.rules_download_url = v; }
+        if let Some(v) = patch.license_server_url { self.license_server_url = v; }
         if let Some(v) = patch.language { self.language = v; }
         if let Some(v) = patch.theme { self.theme = v; }
     }

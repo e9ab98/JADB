@@ -2,17 +2,22 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import '@/i18n';
-import { Loader2, PackagePlus, Smartphone } from 'lucide-react';
+import { Loader2, PackagePlus, Smartphone, Terminal } from 'lucide-react';
 import { open } from '@tauri-apps/plugin-dialog';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
-import { adbInstallApks, adbSystemInfo, type DeviceSystemInfo } from '@/ipc/adb';
+import {
+  adbInstallApks,
+  type DeviceSystemInfo,
+} from '@/ipc/adb';
+import { usePackagesStore } from '@/store/packages';
 import { useLicenseStore } from '@/store/license';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { AdbAppsTab } from '@/features/adb/AdbAppsTab';
 import { AdbShellTab } from '@/features/adb/AdbShellTab';
 import { FileManagerTab } from '@/features/adb/FileManagerTab';
 import { AdbSystemInfoTab } from '@/features/adb/AdbSystemInfoTab';
+import { LogcatTab } from '@/features/adb/LogcatTab';
 
 /**
  * The Apps view is rendered inside its own OS-level window (see
@@ -41,6 +46,7 @@ export function AppsView() {
   // a newer refresh starts before this one resolves we discard the
   // stale result so a slow first fetch can't clobber a fast second one.
   const requestIdRef = useRef(0);
+  const ensureSystemInfoLoaded = usePackagesStore((s) => s.ensureSystemInfoLoaded);
   const refreshSystemInfo = useCallback(async () => {
     if (!serial) return;
     const myId = ++requestIdRef.current;
@@ -49,7 +55,12 @@ export function AppsView() {
     // new "loading" state during the in-flight refresh.
     setSystemInfoError(null);
     try {
-      const data = await adbSystemInfo(serial);
+      // Cached by serial (60s TTL): subsequent tab switches return
+      // instantly without re-running any adb commands. `adbSystemInfoViaAgent`
+      // is the fast path (agent Binder + shell fallback); it falls back
+      // to shell-only if the agent can't run.
+      await ensureSystemInfoLoaded(serial);
+      const data = usePackagesStore.getState().systemInfoBySerial[serial] ?? null;
       if (myId !== requestIdRef.current) return; // stale
       setSystemInfo(data);
       setSystemInfoUpdated(Date.now());
@@ -138,9 +149,13 @@ export function AppsView() {
             <TabsTrigger value="system">{t('adb.systemTab')}</TabsTrigger>
             <TabsTrigger value="apps">{t('adb.appsTab')}</TabsTrigger>
             <TabsTrigger value="files">{t('adb.filesTab')}</TabsTrigger>
+            <TabsTrigger value="logs">
+              <Terminal className="mr-1 h-3.5 w-3.5" />
+              {t('adb.logsTab')}
+            </TabsTrigger>
             <TabsTrigger value="shell">{t('adb.shellTab')}</TabsTrigger>
           </TabsList>
-          <TabsContent value="system">
+          <TabsContent value="system" >
             <AdbSystemInfoTab
               serial={serial}
               info={systemInfo}
@@ -150,13 +165,16 @@ export function AppsView() {
               onRefresh={() => void refreshSystemInfo()}
             />
           </TabsContent>
-          <TabsContent value="apps">
+          <TabsContent value="apps" >
             <AdbAppsTab key={`${serial}-${refreshKey}`} serial={serial} />
           </TabsContent>
-          <TabsContent value="files">
+          <TabsContent value="files" >
             <FileManagerTab key={serial} serial={serial} rootPath="/" />
           </TabsContent>
-          <TabsContent value="shell">
+          <TabsContent value="logs" >
+            <LogcatTab key={serial} serial={serial} />
+          </TabsContent>
+          <TabsContent value="shell" >
             <AdbShellTab key={serial} serial={serial} />
           </TabsContent>
         </Tabs>

@@ -10,6 +10,8 @@ import { SignView } from '@/views/SignView';
 import { AdbView } from '@/views/AdbView';
 import { AppsView } from '@/views/AppsView';
 import { DataDirView } from '@/views/DataDirView';
+import { RulesView } from '@/views/RulesView';
+import { CompareView } from '@/views/CompareView';
 import { useUpdateCheck } from '@/hooks/useUpdateCheck';
 import { useEffect } from 'react';
 import { useLicenseStore } from '@/store/license';
@@ -59,6 +61,8 @@ function Shell() {
           <Route path="/apps-tools" element={<AppsToolsView />} />
           <Route path="/apps" element={<AppsView />} />
           <Route path="/data-dir" element={<DataDirView />} />
+          <Route path="/rules" element={<RulesView />} />
+          <Route path="/compare" element={<CompareView />} />
           <Route path="/settings" element={<SettingsView />} />
         </Routes>
         <VipRequiredDialog />

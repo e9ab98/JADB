@@ -4,6 +4,8 @@ import {
   Settings as SettingsIcon,
   Usb,
   Sparkles,
+  FileSearch,
+  GitCompare,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import '@/i18n';
@@ -14,6 +16,7 @@ import { ExternalLink } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Crown } from 'lucide-react';
 import { useLicenseStore } from '@/store/license';
+import { useAppVersion } from '@/hooks/useAppVersion';
 
 type NavItem = {
   to: string;
@@ -25,6 +28,8 @@ type NavItem = {
 const NAV_ITEMS: NavItem[] = [
   { to: '/adb', labelKey: 'nav.adb', icon: Usb, end: false },
   { to: '/apps-tools', labelKey: 'nav.apps', icon: Sparkles, end: false },
+  { to: '/rules', labelKey: 'nav.rules', icon: FileSearch, end: false },
+  { to: '/compare', labelKey: 'nav.compare', icon: GitCompare, end: false },
   { to: '/sign', labelKey: 'nav.sign', icon: ShieldCheck, end: false },
   { to: '/settings', labelKey: 'nav.settings', icon: SettingsIcon, end: false },
 ];
@@ -35,6 +40,12 @@ function SidebarFooter() {
   const { t } = useTranslation();
   const status = useLicenseStore((s) => s.status);
   const active = status?.state === 'active';
+  const versionInfo = useAppVersion();
+  // Display the version string the user actually sees next to the
+  // check-update button. Falls back to an em-dash so the layout
+  // doesn't shift if the Rust command is still warming up.
+  const versionLabel = versionInfo ? `v${versionInfo.version}` : 'v—';
+  const isDebug = versionInfo?.profile === 'debug';
   return (
     <div className="border-t border-border p-3 text-xs text-text-2">
       <NavLink to="/settings?tab=license" className="mb-2 flex items-center gap-2 rounded-md border border-border bg-bg-1 px-3 py-2 hover:border-brand">
@@ -43,7 +54,17 @@ function SidebarFooter() {
         <span className="ml-auto text-brand">{active ? t('license.manage') : t('license.activate')}</span>
       </NavLink>
       <div className="flex items-center justify-between">
-        <span>{t('sidebar.version', { version: 'v0.1.0' })}</span>
+        <span className="inline-flex items-center gap-1">
+          {t('sidebar.version', { version: versionLabel })}
+          {isDebug && (
+            <span
+              className="rounded bg-amber-500/15 px-1 text-[10px] font-bold text-amber-600"
+              title={t('sidebar.devBuild')}
+            >
+              DEV
+            </span>
+          )}
+        </span>
         <button
           type="button"
           onClick={() => {
@@ -71,12 +92,20 @@ function SidebarFooter() {
 
 export function Sidebar() {
   const { t } = useTranslation();
+  const versionInfo = useAppVersion();
+  // Header chip mirrors the footer version so the user can see
+  // the build number without scrolling. We deliberately use the
+  // same `useAppVersion` hook — the IPC round-trip is amortised
+  // by React's request-dedup logic since the hook runs once in
+  // each component instance but the underlying `invoke` resolves
+  // on the same Tauri command.
+  const headerVersion = versionInfo ? `v${versionInfo.version}` : 'v—';
   return (
     <aside className="flex h-full w-56 shrink-0 flex-col border-r border-border bg-bg-0">
       <div className="flex h-14 items-center gap-2 border-b border-border px-4">
         <div className="grid h-7 w-7 place-items-center rounded-md bg-brand text-sm font-bold text-white">J</div>
         <span className="font-semibold text-text-0">{t('common.appName')}</span>
-        <span className="ml-auto text-xs text-text-2">v0.1.0</span>
+        <span className="ml-auto text-xs text-text-2">{headerVersion}</span>
       </div>
       <nav className="flex-1 space-y-0.5 p-2 overflow-y-auto">
         {NAV_ITEMS.map(({ to, labelKey, icon: Icon, end }) => (

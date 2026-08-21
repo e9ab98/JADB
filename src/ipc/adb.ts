@@ -61,6 +61,31 @@ export async function adbAppInfo(
   return invoke<AppInfo>('adb_app_info', { device, package: packageName });
 }
 
+/**
+ * Lightweight variant of `adbAppInfo` -- `dumpsys package` + `pm path` +
+ * `wc`, no APK pull, no aapt2. ~5 IPCs instead of "pull a 30 MB APK".
+ * Use this for per-card enrichment in the Apps tab; the heavy variant
+ * stays available for callers that actually need the APK on disk.
+ */
+export async function adbAppInfoLite(
+  device: string,
+  packageName: string,
+): Promise<AppInfo> {
+  return invoke<AppInfo>('adb_app_info_lite', { device, package: packageName });
+}
+
+export async function adbListPackagesViaAgent(
+  device: string,
+): Promise<AppInfo[]> {
+  return invoke<AppInfo[]>('adb_list_packages_via_agent', { device });
+}
+
+export async function adbAppIconViaAgent(
+  device: string,
+  packageName: string,
+): Promise<string | null> {
+  return invoke<string | null>('adb_app_icon_via_agent', { device, package: packageName });
+}
 export async function adbAppIcon(
   device: string,
   packageName: string,
@@ -116,6 +141,21 @@ export async function adbClearCache(
   packageName: string,
 ): Promise<string> {
   return invoke<string>('adb_clear_cache', { device, package: packageName });
+}
+
+/** Reboot `device`. `mode` is `null`/`undefined` for a normal reboot,
+ *  `"recovery"` to drop into recovery, `"bootloader"` for fastboot. */
+export async function adbReboot(
+  device: string,
+  mode?: 'recovery' | 'bootloader' | null,
+): Promise<string> {
+  return invoke<string>('adb_reboot', { device, mode: mode ?? null });
+}
+
+/** Power off `device`. Tries `adb reboot -p`; falls back to a power
+ *  button keyevent on devices that lock down the syscall. */
+export async function adbShutdown(device: string): Promise<string> {
+  return invoke<string>('adb_shutdown', { device });
 }
 
 export type ShellOutput = {
@@ -340,4 +380,66 @@ export async function adbSystemInfo(
   device: string,
 ): Promise<DeviceSystemInfo> {
   return invoke<DeviceSystemInfo>('adb_system_info', { device });
+}
+
+/**
+ * Fast variant of `adbSystemInfo` -- asks the on-device agent to fill
+ * the bulk of the fields via Binder (Build.* + SystemProperties ro.* +
+ * ActivityManager + WifiManager + BatteryManager + Configuration), then
+ * falls back to shell for anything the agent couldn't get.
+ *
+ * Falls back to the slow shell-only path on agent failure.
+ */
+export async function adbSystemInfoViaAgent(
+  device: string,
+): Promise<DeviceSystemInfo> {
+  return invoke<DeviceSystemInfo>('adb_system_info_via_agent', { device });
+}
+
+// ---------------------------------------------------------------------------
+// Logcat capture + download
+// ---------------------------------------------------------------------------
+// Logcat is intentionally NOT streamed live in this build: it pulls
+// every line through the Tauri IPC bridge and re-renders the whole
+// virtualized list per push, which costs both latency and battery. The
+// workflow here is:
+//   1. Capture (instant `-d` dump, or N-second follow) to a file on
+//      /data/local/tmp/.
+//   2. Pull that file down via the system save dialog and open it in
+//      whatever external editor the user prefers.
+
+/** Capture logcat on the device to `remotePath` and return line count.
+ *
+ *  `packageName` filters the stream to a single PID (resolved via
+ *  `pidof`; returns NotFound from the backend when the package isn't
+ *  running so the UI can prompt the user to launch the app first).
+ *
+ *  `durationSecs == 0` does an instant ring-buffer dump; `> 0` follows
+ *  for that many seconds and is killed at the end. */
+export async function adbLogcatCapture(
+  device: string,
+  packageName: string | null,
+  remotePath: string,
+  durationSecs: number,
+): Promise<number> {
+  return invoke<number>('adb_logcat_capture', {
+    device,
+    package: packageName,
+    remotePath,
+    durationSecs,
+  });
+}
+
+/** Pull a previously-captured log file from the device to a local path
+ *  (chosen via `dialog.save`). Returns the local path that was used. */
+export async function adbLogcatPull(
+  device: string,
+  remotePath: string,
+  localPath: string,
+): Promise<string> {
+  return invoke<string>('adb_logcat_pull', {
+    device,
+    remotePath,
+    localPath,
+  });
 }

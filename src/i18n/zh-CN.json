@@ -8,7 +8,9 @@
     "edit": "编辑",
     "open": "选择",
     "refresh": "刷新",
-    "close": "关闭"
+    "close": "关闭",
+    "yes": "是",
+    "no": "否"
   },
   "nav": {
     "analyze": "分析",
@@ -19,7 +21,9 @@
     "settings": "设置",
     "jadx": "JADX",
     "adb": "ADB",
-    "apps": "应用"
+    "apps": "应用",
+    "rules": "规则",
+    "compare": "对比"
   },
   "settings": {
     "cacheCategoryApp": "App 缓存目录",
@@ -202,7 +206,19 @@
     "volumeNoDuplicates": "未发现重复文件",
     "volumeRedundantTitle": "冗余资源检测 (内容重复)",
     "volumeTotalCompressed": "总包体占用 (压缩后)",
-    "volumeWaste": "冗余: {{size}}"
+    "volumeWaste": "冗余: {{size}}",
+    "dashObfuscation": "混淆度",
+    "dashObfuscationEmpty": "样本不足（< 4 个组件）",
+    "dashObfuscationLow": "轻度 — 可能是命名混淆",
+    "dashObfuscationMid": "中度 — 建议人工核实",
+    "dashObfuscationHigh": "重度 — 已 R8 深度混淆",
+    "obfuscation": "混淆度",
+    "debuggable": "可调试",
+    "locales": "语言",
+    "supportsScreens": "支持屏幕",
+    "usesFeature": "硬件/软件特性",
+    "usesLibrary": "依赖库",
+    "usesPermissionSdk23": "运行时权限"
   },
   "decompile": {
     "force": "覆盖已有 apktool.yml",
@@ -306,7 +322,8 @@
     "fieldDName": "证书 DN (可选)",
     "dnameHint": "空字段使用默认值;CN 留空时默认为 \"Android\"。",
     "optional": "可选",
-    "createFailed": "创建签名失败:{{error}}"
+    "createFailed": "创建签名失败:{{error}}",
+    "passwordMismatch": "Keystore 密码与 Key 密码不一致,请使用相同密码后重试。"
   },
   "jadx": {
     "start": "开始 JADX",
@@ -336,7 +353,40 @@
     "sectionServices": "Service",
     "sectionReceivers": "Receiver",
     "sectionProviders": "Provider",
-    "unmatched": "未识别"
+    "unmatched": "未识别",
+    "title": "规则分析",
+    "subtitle": "选择 APK,挑选要运行的规则集,在结果中可直接看到 LibChecker 的元数据(label / 团队 / 中文说明 / 源码链接)。",
+    "pickApk": "选择 APK",
+    "run": "运行规则",
+    "rerun": "重新运行",
+    "running": "运行中…",
+    "loadingPacks": "正在加载已安装的规则集…",
+    "noPacksHint": "尚未安装任何规则集。请到 设置 → 工具链 安装 bundled 入门规则,或从 GitHub 拉取 LibChecker 规则。",
+    "availablePacks": "已安装 {{count}} 个规则集",
+    "selectAll": "全选",
+    "selectNone": "清空",
+    "noPackSelected": "至少选择一个规则集才能运行。",
+    "invalidSourceLink": "已拒绝打开非 http(s) 的源码链接。",
+    "filterSeverity": "严重度",
+    "searchPlaceholder": "按名称 / 标签 / 团队搜索",
+    "noMatches": "过滤后没有匹配结果。",
+    "matchedCount": "{{count}} 条匹配",
+    "summaryMatched": "过滤后命中 {{matched}} / {{total}} 条",
+    "sevInfo": "提示 · {{count}}",
+    "sevWarn": "警告 · {{count}}",
+    "sevDanger": "危险 · {{count}}",
+    "sevTab": {
+      "all": "全部",
+      "info": "提示",
+      "warn": "警告",
+      "danger": "危险"
+    },
+    "catNativeLibs": "原生库",
+    "catActivities": "Activity",
+    "catServices": "Service",
+    "catReceivers": "Receiver",
+    "catProviders": "Provider",
+    "noMetadata": "该规则没有上游元数据(自带入门规则)。"
   },
   "adb": {
     "connectionTitle": "设备连接",
@@ -385,6 +435,7 @@
     "uninstallConfirmTitle": "确认卸载",
     "uninstallConfirmDesc": "将卸载 {{label}} ({{pkg}})。此操作不可撤销。",
     "uninstallSuccess": "{{pkg}} 已卸载",
+    "logsTab": "日志",
     "shellTab": "Shell",
     "shellTitle": "Shell 命令",
     "shellPlaceholder": "输入 adb shell 命令,如 pm list packages -3",
@@ -436,6 +487,25 @@
     "installing": "正在安装…",
     "installSuccess": "成功安装 {{count}} 个 APK",
     "installPartial": "安装完成：成功 {{success}} 个，失败 {{failed}} 个",
+    "adbLogcat": {
+      "captureTitle": "采集 logcat",
+      "capture": "采集",
+      "capturing": "采集中…",
+      "capturingDuration": "采集中（剩余 {{s}}s）…",
+      "durationTooltip": "0 = 立即转储当前缓冲区，N = 持续采集 N 秒",
+      "packagePlaceholder": "包名（可选，按 PID 过滤）",
+      "captureHint": "采集到设备的 /data/local/tmp/。下载后用任意外部编辑器打开。",
+      "lineCount": "{{count}} 行",
+      "download": "下载到本地…",
+      "saveTitle": "另存 logcat 为…",
+      "captureDone": "已采集 {{count}} 行到 {{path}}",
+      "downloadDone": "已保存到 {{path}}",
+      "allPackages": "全部应用",
+      "comboboxFilter": "过滤…",
+      "comboboxEmpty": "无匹配项",
+      "durationLabel": "持续秒数",
+      "packagesLoadFailed": "应用列表加载失败：{{error}}"
+    },
     "systemTab": "系统",
     "refresh": "刷新",
     "sysInfo": {
@@ -519,14 +589,22 @@
       "screenState": "屏幕状态",
       "errorTitle": "加载失败",
       "uptimeLabel": "运行 {{value}}"
-    }
+    },
+    "powerMenu": "电源",
+    "powerMenuTooltip": "重启/恢复/刷机模式/关机 已连接设备",
+    "powerNoDevices": "暂无在线设备",
+    "powerReboot": "重启",
+    "powerRecovery": "重启到 Recovery",
+    "powerBootloader": "重启到 Bootloader",
+    "powerShutdown": "关机"
   },
   "sidebar": {
     "version": "{{version}}",
     "releases": "更新日志",
     "checkUpdates": "查看更新",
     "upToDate": "暂无可用更新",
-    "updateFailed": "检查更新失败"
+    "updateFailed": "检查更新失败",
+    "devBuild": "Debug 构建"
   },
   "apps": {
     "title": "应用",
@@ -577,7 +655,8 @@
     "download": "下载",
     "downloadSuccess": "已下载 {{name}}({{detail}})到 {{path}}",
     "downloadFailed": "下载失败:{{error}}",
-    "openSaveDialogFailed": "无法打开保存对话框:{{error}}"
+    "openSaveDialogFailed": "无法打开保存对话框:{{error}}",
+    "openLinkTooltip": "点击进入目标:{{target}}"
   },
   "lineages": {
     "title": "Lineage 管理",
@@ -633,7 +712,8 @@
       "active": "有效",
       "expired": "已过期",
       "deviceMismatch": "设备不匹配",
-      "invalid": "授权无效"
+      "invalid": "授权无效",
+      "noDeviceBinding": "未绑定设备"
     },
     "feature": {
       "all": "全部模块（通用授权）",
@@ -647,6 +727,70 @@
     "copyWechat": "复制微信号",
     "wechatCopied": "微信号 godfeer 已复制",
     "vipBenefits": "VIP 可解锁以下功能",
-    "purchasePrefix": "如需开通，请联系微信"
+    "purchasePrefix": "如需开通，请联系微信",
+    "boundToOther": "此 license 已绑定到机器",
+    "replaceBinding": "替换绑定到本机",
+    "rebindSuccess": "替换绑定成功，本机已激活",
+    "rebindFailed": "替换绑定失败",
+    "noDeviceBindingHint": "此 license 未绑定设备码，仅限在线激活。请在授权设置中配置 license server URL 后再使用。"
+  },
+  "compare": {
+    "title": "APK 对比",
+    "subtitle": "并排对比两份 APK 的包元数据、权限、组件、原生库与规则命中。",
+    "pickLeft": "选择 APK A",
+    "pickRight": "选择 APK B",
+    "left": "APK A",
+    "right": "APK B",
+    "swap": "互换",
+    "clear": "清空",
+    "analyzing": "分析中…",
+    "metaTitle": "基础信息",
+    "metaPackage": "包名",
+    "metaVersionName": "版本",
+    "metaVersionCode": "版本号",
+    "metaSdk": "SDK",
+    "metaLabel": "应用名",
+    "metaFileSize": "文件大小",
+    "metaMinSdk": "最低",
+    "metaTargetSdk": "目标",
+    "metaMaxSdk": "最高",
+    "metaUnchanged": "无变化",
+    "metaChanged": "已变化",
+    "permissionsTitle": "权限",
+    "permissionsAdded": "新增 {{count}} 项",
+    "permissionsRemoved": "移除 {{count}} 项",
+    "permissionsShared": "相同 {{count}} 项",
+    "componentsTitle": "组件",
+    "componentsAdded": "新增 {{count}} 项",
+    "componentsRemoved": "移除 {{count}} 项",
+    "componentsShared": "相同 {{count}} 项",
+    "componentsAddedLabel": "仅 {{side}} 有",
+    "componentsRemovedLabel": "仅 {{side}} 有",
+    "componentsSharedLabel": "两者都有",
+    "nativeLibsTitle": "原生库",
+    "rulesTitle": "规则命中",
+    "rulesAdded": "新增 {{count}} 项",
+    "rulesRemoved": "消失 {{count}} 项",
+    "rulesShared": "共有 {{count}} 项",
+    "empty": "选择两份 APK 开始对比。",
+    "pickBoth": "请先选择 APK A 和 APK B。",
+    "errorTitle": "对比失败",
+    "notAnalyzed": "尚未分析",
+    "categoryActivities": "Activity",
+    "categoryServices": "Service",
+    "categoryReceivers": "Receiver",
+    "categoryProviders": "Provider",
+    "severity": "严重度",
+    "severityInfo": "提示",
+    "severityWarn": "警告",
+    "severityDanger": "危险",
+    "exportVip": "导出对比报告 · VIP",
+    "exported": "对比报告已保存到 {{path}}",
+    "exportFailed": "导出报告失败:{{error}}",
+    "matchedCount": "共 {{count}} 项",
+    "sideFailed": "APK {{side}} 分析失败:{{error}}",
+    "rulesFailed": "APK {{side}} 的规则分析失败:{{error}}",
+    "rulesPacksAvailable": "可用规则集 {{count}} 个",
+    "rulesPacksHint": "勾选的规则集会自动应用到两侧 APK 的分析中。"
   }
 }

@@ -66,6 +66,24 @@ export type ApkInfo = {
   raw_badging: string;
   native_libs?: string[];
   intent_actions?: string[];
+  /** Hardware / software features the app needs (e.g. `android.hardware.camera`). */
+  uses_feature?: string[];
+  /** Shared libraries the app links to via `<uses-library>`. */
+  uses_library?: string[];
+  /** Runtime-only permissions (Android 6.0+). */
+  uses_permission_sdk_23?: string[];
+  /** Screen size / density buckets the app actively supports. */
+  supports_screens?: string[];
+  /** BCP-47 language tags the app ships localised resources for. */
+  locales?: string[];
+  /** `application-debuggable` line from badging; surfaces above the
+   *  security report so the basicInfo card can render it without
+   *  traversing the nested structure. */
+  application_debuggable?: boolean;
+  /** Fraction of class names whose last segment is <= 3 chars (a
+   *  ProGuard / R8 obfuscation heuristic). Defaults to 0.0 for
+   *  tiny APKs that fall below the heuristic's `total < 4` floor. */
+  short_name_ratio?: number;
   file_size?: number | null;
   volume_total_size?: number | null;
   volume_stats?: VolumeStats | null;
@@ -82,6 +100,19 @@ export type ApkInfo = {
    *  zip-path signature matching during analysis; cheap to compute and
    *  always present unless the analyze pipeline itself failed. */
   packer?: PackerReport | null;
+  /** Absolute path of the launcher icon inside the APK zip, as
+   *  reported by aapt2 `dump badging`. Always paired with
+   *  `iconDataUrl` when present; either both set or both null so
+   *  callers never have to handle "path without bytes". Useful
+   *  for debug overlays that want to show the raw archive path. */
+  iconPath?: string | null;
+  /** `data:image/png|webp|jpeg;base64,...` for the launcher icon.
+   *  Read from the APK zip on the Rust side because the frontend
+   *  cannot reach inside the archive. `null` when the APK has no
+   *  raster `application-icon-*` line — the UI falls back to a
+   *  letter avatar in that case. Adaptive-icon XML descriptors
+   *  are intentionally skipped (single-image rendering). */
+  iconDataUrl?: string | null;
 };
 
 export async function analyzeApk(path: string): Promise<ApkInfo> {

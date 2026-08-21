@@ -61,6 +61,14 @@ export function NewSignatureDialog({ open, onOpenChange, onSubmit }: Props) {
 
   async function onSubmitForm(e: React.FormEvent) {
     e.preventDefault();
+    // Java 的 keytool 在 JKS 格式下虽然容忍两个密码不同,
+    // 但下游 Android Studio / apksigner 在 keystore 加载阶段
+    // 通常只提示一次,用户极易混淆 keyPassword 和 keystorePassword。
+    // 这里强制一致,避免生成成功却用不上的"假成功"流程。
+    if (keystorePassword !== keyPassword) {
+      toast.error(t('signatures.passwordMismatch'));
+      return;
+    }
     setBusy(true);
     try {
       await onSubmit({

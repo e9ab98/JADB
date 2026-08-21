@@ -8,7 +8,13 @@ export type RuleKind =
   | 'sdk'
   | 'manifest'
   | 'native_library'
-  | 'action';
+  | 'action'
+  // Newly wired in this PR. Matches come from
+  // `info.uses_feature` / `info.uses_library`, which the analyzer
+  // now fills from xmltree. The matcher supports glob-style
+  // wildcards in `match.name`.
+  | 'uses_feature'
+  | 'uses_library';
 
 export type Rule = {
   id: string;

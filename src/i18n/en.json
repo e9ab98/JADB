@@ -8,7 +8,9 @@
     "edit": "Edit",
     "open": "Pick",
     "refresh": "Refresh",
-    "close": "Close"
+    "close": "Close",
+    "yes": "Yes",
+    "no": "No"
   },
   "nav": {
     "analyze": "Analyze",
@@ -19,7 +21,9 @@
     "settings": "Settings",
     "jadx": "JADX",
     "adb": "ADB",
-    "apps": "Apps"
+    "apps": "Apps",
+    "rules": "Rules",
+    "compare": "Compare"
   },
   "settings": {
     "cacheCategoryApp": "App cache directory",
@@ -202,7 +206,19 @@
     "volumeNoDuplicates": "No duplicates found",
     "volumeRedundantTitle": "Top Waste (Duplicate Files)",
     "volumeTotalCompressed": "Total Size (Compressed)",
-    "volumeWaste": "Waste: {{size}} (Redundant)"
+    "volumeWaste": "Waste: {{size}} (Redundant)",
+    "dashObfuscation": "Obfuscation",
+    "dashObfuscationEmpty": "Sample too small (< 4 components)",
+    "dashObfuscationLow": "Low — likely ProGuard",
+    "dashObfuscationMid": "Medium — inspect manually",
+    "dashObfuscationHigh": "High — R8 deep mangling",
+    "obfuscation": "Obfuscation",
+    "debuggable": "Debuggable",
+    "locales": "Locales",
+    "supportsScreens": "Screens",
+    "usesFeature": "Uses-feature",
+    "usesLibrary": "Uses-library",
+    "usesPermissionSdk23": "Runtime perms"
   },
   "decompile": {
     "force": "Overwrite existing apktool.yml",
@@ -306,7 +322,8 @@
     "fieldDName": "Certificate DN (optional)",
     "dnameHint": "Empty fields use defaults; CN defaults to \"Android\" when blank.",
     "optional": "optional",
-    "createFailed": "Failed to create signature: {{error}}"
+    "createFailed": "Failed to create signature: {{error}}",
+    "passwordMismatch": "Keystore password and Key password must be identical. Please use the same password for both and retry."
   },
   "jadx": {
     "start": "Start JADX",
@@ -336,7 +353,40 @@
     "sectionServices": "Services",
     "sectionReceivers": "Receivers",
     "sectionProviders": "Providers",
-    "unmatched": "unmatched"
+    "unmatched": "unmatched",
+    "title": "Rules",
+    "subtitle": "Pick an APK, choose which rule packs to run, and review the matched libraries with full LibChecker metadata inline.",
+    "pickApk": "Pick APK",
+    "run": "Run rules",
+    "rerun": "Re-run",
+    "running": "Running…",
+    "loadingPacks": "Loading installed rule packs…",
+    "noPacksHint": "No rule packs are installed yet. Open Settings → Tools and install either bundled starter rules or LibChecker-Rules from GitHub.",
+    "availablePacks": "{{count}} rule packs installed",
+    "selectAll": "Select all",
+    "selectNone": "Clear",
+    "noPackSelected": "Select at least one rule pack to run.",
+    "invalidSourceLink": "Refused to open a non-http(s) source link.",
+    "filterSeverity": "Severity",
+    "searchPlaceholder": "Search by name, label, or vendor",
+    "noMatches": "No matched components after filtering.",
+    "matchedCount": "{{count}} matches",
+    "summaryMatched": "{{matched}} matched out of {{total}} filtered",
+    "sevInfo": "Info · {{count}}",
+    "sevWarn": "Warning · {{count}}",
+    "sevDanger": "Danger · {{count}}",
+    "sevTab": {
+      "all": "All",
+      "info": "Info",
+      "warn": "Warn",
+      "danger": "Danger"
+    },
+    "catNativeLibs": "Native Libraries",
+    "catActivities": "Activities",
+    "catServices": "Services",
+    "catReceivers": "Receivers",
+    "catProviders": "Providers",
+    "noMetadata": "This rule has no upstream metadata (bundled starter rule)."
   },
   "adb": {
     "connectionTitle": "Device Connection",
@@ -385,6 +435,7 @@
     "uninstallConfirmTitle": "Confirm uninstall",
     "uninstallConfirmDesc": "Will uninstall {{label}} ({{pkg}}). This cannot be undone.",
     "uninstallSuccess": "{{pkg}} uninstalled",
+    "logsTab": "Logs",
     "shellTab": "Shell",
     "shellTitle": "Shell Commands",
     "shellPlaceholder": "Enter adb shell command, e.g. pm list packages -3",
@@ -436,6 +487,25 @@
     "installing": "Installing…",
     "installSuccess": "Installed {{count}} APK(s)",
     "installPartial": "Installation finished: {{success}} succeeded, {{failed}} failed",
+    "adbLogcat": {
+      "captureTitle": "Capture logcat",
+      "capture": "Capture",
+      "capturing": "Capturing…",
+      "capturingDuration": "Capturing for {{s}}s…",
+      "durationTooltip": "0 = dump current buffer, N = stream for N seconds",
+      "packagePlaceholder": "Package name (optional, filters by PID)",
+      "captureHint": "Captures to /data/local/tmp/ on the device. Download the file and open it in any external editor.",
+      "lineCount": "{{count}} lines",
+      "download": "Download to local…",
+      "saveTitle": "Save logcat as…",
+      "captureDone": "Captured {{count}} lines to {{path}}",
+      "downloadDone": "Saved to {{path}}",
+      "allPackages": "All packages",
+      "comboboxFilter": "Filter…",
+      "comboboxEmpty": "No matches",
+      "durationLabel": "Duration",
+      "packagesLoadFailed": "Couldn't load package list: {{error}}"
+    },
     "systemTab": "System",
     "refresh": "Refresh",
     "sysInfo": {
@@ -519,14 +589,22 @@
       "screenState": "Screen",
       "errorTitle": "Failed to load",
       "uptimeLabel": "Up {{value}}"
-    }
+    },
+    "powerMenu": "Power",
+    "powerMenuTooltip": "Reboot, recovery, bootloader, or power off the connected device",
+    "powerNoDevices": "No online devices",
+    "powerReboot": "Reboot",
+    "powerRecovery": "Reboot to recovery",
+    "powerBootloader": "Reboot to bootloader",
+    "powerShutdown": "Power off"
   },
   "sidebar": {
     "version": "{{version}}",
     "releases": "Releases",
     "checkUpdates": "Check for updates",
     "upToDate": "Already up to date",
-    "updateFailed": "Update check failed"
+    "updateFailed": "Update check failed",
+    "devBuild": "Debug build"
   },
   "apps": {
     "title": "Apps",
@@ -577,7 +655,8 @@
     "download": "Download",
     "downloadSuccess": "Downloaded {{name}} ({{detail}}) to {{path}}",
     "downloadFailed": "Download failed: {{error}}",
-    "openSaveDialogFailed": "Cannot open save dialog: {{error}}"
+    "openSaveDialogFailed": "Cannot open save dialog: {{error}}",
+    "openLinkTooltip": "Click to open its target: {{target}}"
   },
   "lineages": {
     "title": "Lineage Management",
@@ -633,7 +712,8 @@
       "active": "Active",
       "expired": "Expired",
       "deviceMismatch": "Device mismatch",
-      "invalid": "Invalid license"
+      "invalid": "Invalid license",
+      "noDeviceBinding": "No device binding"
     },
     "feature": {
       "all": "All modules (full unlock)",
@@ -647,6 +727,70 @@
     "copyWechat": "Copy WeChat ID",
     "wechatCopied": "WeChat ID godfeer copied",
     "vipBenefits": "VIP unlocks these features",
-    "purchasePrefix": "To upgrade, contact WeChat"
+    "purchasePrefix": "To upgrade, contact WeChat",
+    "boundToOther": "This license is already bound to machine",
+    "replaceBinding": "Replace binding to this machine",
+    "rebindSuccess": "Binding replaced, this machine is now active",
+    "rebindFailed": "Failed to replace binding",
+    "noDeviceBindingHint": "This license has no device binding and requires online activation. Please configure a license server URL in Authorization settings."
+  },
+  "compare": {
+    "title": "APK Compare",
+    "subtitle": "Diff two APKs side-by-side — package metadata, permissions, components, native libraries, and rule hits.",
+    "pickLeft": "Pick APK A",
+    "pickRight": "Pick APK B",
+    "left": "APK A",
+    "right": "APK B",
+    "swap": "Swap",
+    "clear": "Clear",
+    "analyzing": "Analyzing…",
+    "metaTitle": "Metadata",
+    "metaPackage": "Package",
+    "metaVersionName": "Version",
+    "metaVersionCode": "Build",
+    "metaSdk": "SDK",
+    "metaLabel": "Label",
+    "metaFileSize": "File size",
+    "metaMinSdk": "min",
+    "metaTargetSdk": "target",
+    "metaMaxSdk": "max",
+    "metaUnchanged": "no change",
+    "metaChanged": "changed",
+    "permissionsTitle": "Permissions",
+    "permissionsAdded": "{{count}} added",
+    "permissionsRemoved": "{{count}} removed",
+    "permissionsShared": "{{count}} unchanged",
+    "componentsTitle": "Components",
+    "componentsAdded": "{{count}} added",
+    "componentsRemoved": "{{count}} removed",
+    "componentsShared": "{{count}} unchanged",
+    "componentsAddedLabel": "only in {{side}}",
+    "componentsRemovedLabel": "only in {{side}}",
+    "componentsSharedLabel": "in both",
+    "nativeLibsTitle": "Native Libraries",
+    "rulesTitle": "Rule Hits",
+    "rulesAdded": "{{count}} new",
+    "rulesRemoved": "{{count}} gone",
+    "rulesShared": "{{count}} shared",
+    "empty": "Pick both APKs to start comparing.",
+    "pickBoth": "Pick APK A and APK B to begin.",
+    "errorTitle": "Compare failed",
+    "notAnalyzed": "not analyzed",
+    "categoryActivities": "Activities",
+    "categoryServices": "Services",
+    "categoryReceivers": "Receivers",
+    "categoryProviders": "Providers",
+    "severity": "Severity",
+    "severityInfo": "Info",
+    "severityWarn": "Warning",
+    "severityDanger": "Danger",
+    "exportVip": "Export comparison report · VIP",
+    "exported": "Comparison report saved to {{path}}",
+    "exportFailed": "Failed to export report: {{error}}",
+    "matchedCount": "{{count}} items",
+    "sideFailed": "APK {{side}} failed: {{error}}",
+    "rulesFailed": "Rule analysis for APK {{side}} failed: {{error}}",
+    "rulesPacksAvailable": "{{count}} rule packs available",
+    "rulesPacksHint": "Selected packs are auto-applied when both sides analyze."
   }
 }

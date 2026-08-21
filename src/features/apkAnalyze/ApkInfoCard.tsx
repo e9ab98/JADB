@@ -19,6 +19,7 @@ import {
   ChevronDown,
   ChevronRight,
   AlertTriangle,
+  Eraser,
 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
@@ -88,19 +89,46 @@ function formatSize(bytes: number | null | undefined): string {
   return `${v.toFixed(2)} ${units[i]}`;
 }
 
-function AppAvatar({ label }: { label: string }) {
-  // JADB 当前 ApkInfo 不携带 icon 数据；用首字母 + 渐变占位，风格与 VSKiller
-  // 的 80x80 应用图标位保持一致。后续若后端加 iconBase64 字段只需替换。
+function AppAvatar({ label, src }: { label: string; src?: string | null | undefined }) {
+  // Real APK icon when the analyzer pipeline managed to read the raster
+  // launcher icon out of the zip; otherwise the first letter + gradient
+  // placeholder. The letter path is identical to the previous design so
+  // screenshots / translations stay stable; only the happy path adds an
+  // <img> with the data URL the backend hands us.
   const initial = (label || '?').trim().charAt(0).toUpperCase() || '?';
+  const baseClass = cn(
+    'grid h-16 w-16 shrink-0 place-items-center rounded-2xl overflow-hidden',
+    'bg-gradient-to-br from-brand/30 to-brand/0 text-brand-strong',
+    'ring-1 ring-border shadow-card',
+  );
+  if (src) {
+    return (
+      <div className={baseClass} aria-hidden>
+        <img
+          src={src}
+          alt=""
+          draggable={false}
+          className="h-full w-full object-cover"
+          // Defensive: aapt2 always emits PNG/WebP/JPEG for raster
+          // icons, but if a future build hands us something the
+          // browser cannot decode we silently fall back to the letter
+          // avatar instead of leaving a broken icon on screen.
+          onError={(e) => {
+            const target = e.currentTarget;
+            target.style.display = 'none';
+            const parent = target.parentElement;
+            if (parent && !parent.dataset.fallback) {
+              parent.dataset.fallback = '1';
+              parent.classList.add('text-2xl', 'font-bold');
+              parent.textContent = initial;
+            }
+          }}
+        />
+      </div>
+    );
+  }
   return (
-    <div
-      className={cn(
-        'grid h-16 w-16 shrink-0 place-items-center rounded-2xl',
-        'bg-gradient-to-br from-brand/30 to-brand/0 text-brand-strong',
-        'ring-1 ring-border shadow-card text-2xl font-bold',
-      )}
-      aria-hidden
-    >
+    <div className={cn(baseClass, 'text-2xl font-bold')} aria-hidden>
       {initial}
     </div>
   );
@@ -176,6 +204,36 @@ function MetaRow({ label, value }: { label: string; value: React.ReactNode }) {
       <span className="w-24 shrink-0 text-xs text-text-2">{label}</span>
       <span className="min-w-0 break-all font-mono text-sm text-text-0">{value}</span>
     </div>
+  );
+}
+
+/// Render a list of strings as a comma-separated chip block. We
+/// cap at 12 visible entries so the basicInfo card never grows
+/// past a single screen on real-world APKs (e.g. Google Maps
+/// declares 50+ `<uses-feature>` entries). The cap is large
+/// enough for the median APK; power users who want the full list
+/// can grep the raw `info.raw_badging` field.
+function renderListWithOverflow(items: readonly string[]): React.ReactNode {
+  if (items.length === 0) return '—';
+  const cap = 12;
+  const visible = items.slice(0, cap);
+  const overflow = items.length - visible.length;
+  return (
+    <span className="flex flex-wrap gap-1">
+      {visible.map((item) => (
+        <span
+          key={item}
+          className="rounded bg-bg-2 px-1.5 py-0.5 text-[11px] text-text-1"
+        >
+          {item}
+        </span>
+      ))}
+      {overflow > 0 && (
+        <span className="rounded bg-bg-2 px-1.5 py-0.5 text-[11px] text-text-2">
+          +{overflow}
+        </span>
+      )}
+    </span>
   );
 }
 
@@ -742,12 +800,55 @@ export function ApkInfoCard({ info, ruleReport }: Props) {
       : '—';
   const componentCount = totalComponents(info);
   const matchCount = countMatches(ruleReport);
+  // Count of "core fields" we successfully parsed on this APK. The
+  // baseline 7 (package, version_name, version_code, min_sdk,
+  // target_sdk, max_sdk, application_label) is always counted
+  // regardless of APK contents; +1 per non-empty list-shaped
+  // field gives the user a hint at "how much did we extract".
+  const basicInfoCount =
+    7 +
+    (info.permissions.length > 0 ? 1 : 0) +
+    (info.activities.length > 0 ? 1 : 0) +
+    (info.services.length > 0 ? 1 : 0) +
+    (info.receivers.length > 0 ? 1 : 0) +
+    (info.providers.length > 0 ? 1 : 0) +
+    (info.uses_feature && info.uses_feature.length > 0 ? 1 : 0) +
+    (info.uses_library && info.uses_library.length > 0 ? 1 : 0) +
+    (info.uses_permission_sdk_23 && info.uses_permission_sdk_23.length > 0 ? 1 : 0) +
+    (info.supports_screens && info.supports_screens.length > 0 ? 1 : 0) +
+    (info.locales && info.locales.length > 0 ? 1 : 0) +
+    (info.native_libs && info.native_libs.length > 0 ? 1 : 0) +
+    (info.intent_actions && info.intent_actions.length > 0 ? 1 : 0);
   const ruleSetCount = 0; // rule_set 数量不再透出到 UI；后续若需要可从 components.matched_rule.rule_set_id 去重
   const security: SecurityReport | null = info.security_report ?? null;
   const securityScore = security?.score ?? null;
   const risks = riskLevelCounts(security);
   const techStack = info.tech_stack ?? [];
   const waste = volumeWasteText(info.volume_stats);
+  // Obfuscation chip. The Rust side returns 0.0 for APKs that
+  // fall below the `total < 4` floor — we still render that as
+  // 0% (the alternative, "—", would not communicate "we actually
+  // checked and found nothing"). Anything above 0.5 is "heavy"
+  // obfuscation (R8 / ProGuard with `-allowaccessmodification`).
+  const obfuscationRatio = Math.max(0, Math.min(1, info.short_name_ratio ?? 0));
+  const hasObfuscationData = (info.short_name_ratio ?? 0) > 0;
+  const obfuscationValue = hasObfuscationData
+    ? Math.round(obfuscationRatio * 100)
+    : '—';
+  const obfuscationDescKey = !hasObfuscationData
+    ? 'analyze.dashObfuscationEmpty'
+    : obfuscationRatio >= 0.5
+      ? 'analyze.dashObfuscationHigh'
+      : obfuscationRatio >= 0.3
+        ? 'analyze.dashObfuscationMid'
+        : 'analyze.dashObfuscationLow';
+  const obfuscationAccent = !hasObfuscationData
+    ? 'from-slate-500/15 to-slate-500/0'
+    : obfuscationRatio >= 0.5
+      ? 'from-red-500/15 to-red-500/0'
+      : obfuscationRatio >= 0.3
+        ? 'from-amber-500/15 to-amber-500/0'
+        : 'from-emerald-500/15 to-emerald-500/0';
 
   return (
     <div className="space-y-6 anim-rise">
@@ -758,7 +859,7 @@ export function ApkInfoCard({ info, ruleReport }: Props) {
           aria-hidden
         />
         <div className="relative flex items-start gap-5">
-          <AppAvatar label={label} />
+          <AppAvatar label={label} src={info.iconDataUrl} />
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
               <h1 className="truncate text-2xl font-bold text-text-0">
@@ -792,7 +893,7 @@ export function ApkInfoCard({ info, ruleReport }: Props) {
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
         <DashCard
           label={t('analyze.dashboardBasic')}
-          value={7}
+          value={basicInfoCount}
           unit="fields"
           desc={t('analyze.dashboardTotalDesc')}
           icon={Info}
@@ -828,8 +929,8 @@ export function ApkInfoCard({ info, ruleReport }: Props) {
         />
       </div>
 
-      {/* Secondary dashboard: volume + security */}
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+      {/* Secondary dashboard: volume + security + obfuscation */}
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
         <DashCard
           label={t('analyze.dashVolume')}
           value={formatSize(info.volume_total_size ?? 0)}
@@ -850,6 +951,14 @@ export function ApkInfoCard({ info, ruleReport }: Props) {
           })}
           icon={Gauge}
           accent="from-rose-500/15 to-rose-500/0"
+        />
+        <DashCard
+          label={t('analyze.dashObfuscation')}
+          value={obfuscationValue}
+          unit={obfuscationValue === '—' ? undefined : '%'}
+          desc={t(obfuscationDescKey)}
+          icon={Eraser}
+          accent={obfuscationAccent}
         />
       </div>
 
@@ -971,6 +1080,38 @@ export function ApkInfoCard({ info, ruleReport }: Props) {
                     value={info.target_sdk ?? '—'}
                   />
                   <MetaRow label={t('analyze.maxSdk')} value={info.max_sdk ?? '—'} />
+                  <MetaRow
+                    label={t('analyze.debuggable')}
+                    value={info.application_debuggable ? t('common.yes') : t('common.no')}
+                  />
+                  <MetaRow
+                    label={t('analyze.obfuscation')}
+                    value={
+                      (info.short_name_ratio ?? 0) > 0
+                        ? `${Math.round((info.short_name_ratio ?? 0) * 100)}%`
+                        : '—'
+                    }
+                  />
+                  <MetaRow
+                    label={t('analyze.locales')}
+                    value={renderListWithOverflow(info.locales ?? [])}
+                  />
+                  <MetaRow
+                    label={t('analyze.supportsScreens')}
+                    value={renderListWithOverflow(info.supports_screens ?? [])}
+                  />
+                  <MetaRow
+                    label={t('analyze.usesFeature')}
+                    value={renderListWithOverflow(info.uses_feature ?? [])}
+                  />
+                  <MetaRow
+                    label={t('analyze.usesLibrary')}
+                    value={renderListWithOverflow(info.uses_library ?? [])}
+                  />
+                  <MetaRow
+                    label={t('analyze.usesPermissionSdk23')}
+                    value={renderListWithOverflow(info.uses_permission_sdk_23 ?? [])}
+                  />
                 </div>
               </SectionCard>
             </TabsContent>

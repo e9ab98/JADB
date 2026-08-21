@@ -13,3 +13,4 @@ export const EVT = {
 export function onSettingsChanged(cb: (settings: Settings) => void): Promise<UnlistenFn> {
   return listen<Settings>(EVT.SettingsChanged, (e) => cb(e.payload));
 }
+

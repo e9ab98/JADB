@@ -1,4 +1,5 @@
 pub mod adb_manager;
+pub mod adb_agent;
 pub mod adb_dumpsys;
 pub mod cache;
 pub mod apk_analyzer;
@@ -15,5 +16,6 @@ pub mod signature_manager;
 pub mod task_registry;
 pub mod tool_manager;
 pub mod java_runtime;
+pub mod logcat_manager;
 
 pub mod license;

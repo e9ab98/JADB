@@ -58,3 +58,10 @@ scripts/.daily-review.env
 **/issued-licenses/
 tools/license-admin/target/
 tools/license-admin/private/
+
+# license-server runtime data (admin token + 签发记录)
+tools/license-server/target/
+tools/license-server/data/
+
+# license-server docker-compose 用：本地私钥挂载点
+tools/license-server/private/

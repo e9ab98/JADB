@@ -188,7 +188,7 @@ export function AdbShellTab({ serial }: Props) {
         </CardContent>
       </Card>
 
-      <Card>
+      <Card className="overflow-hidden">
         <CardContent className="p-0">
           {runs.length === 0 ? (
             <div className="px-4 py-6 text-sm text-text-2">

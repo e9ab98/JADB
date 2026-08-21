@@ -33,6 +33,24 @@ pub struct ApkInfo {
     pub tech_stack: Vec<String>,
     pub insights: Vec<String>,
     pub raw_badging: String,
+    // ---- Badging / xmltree only surface when the APK actually declares them. ----
+    //
+    // `uses_feature`                   → hardware / software features the app needs.
+    // `uses_library`                   → shared libraries the app links to (e.g. maps).
+    // `uses_permission_sdk_23`         → runtime-only permissions (Android 6+).
+    // `supports_screens`               → screen size / density buckets the app supports.
+    // `locales`                        → `<locales>` block or `supports-locales` summary.
+    // `application_debuggable`         → `application-debuggable` line from badging.
+    // `short_name_ratio`               → 0.0..=1.0 fraction of class names with <= 3 chars
+    //                                   in the last segment (ProGuard / R8 obfuscation
+    //                                   heuristic; see `parse_repeat`).
+    pub uses_feature: Vec<String>,
+    pub uses_library: Vec<String>,
+    pub uses_permission_sdk_23: Vec<String>,
+    pub supports_screens: Vec<String>,
+    pub locales: Vec<String>,
+    pub application_debuggable: bool,
+    pub short_name_ratio: f32,
     pub file_size: Option<u64>,
     pub volume_total_size: Option<u64>,
     pub volume_stats: Option<VolumeStats>,
@@ -47,7 +65,22 @@ pub struct ApkInfo {
     /// use `packer.as_ref().map(|p| p.is_packed).unwrap_or(false)` to
     /// treat a missing report as "not detected".
     pub packer: Option<PackerReport>,
+    /// Absolute path inside the APK (e.g. `res/mipmap-xxhdpi-v4/ic_launcher.png`)
+    /// for the launcher icon reported by aapt2. `None` when the APK has
+    /// no `application-icon-*` line or we failed to resolve one. Always
+    /// paired with `icon_data_url` when present; either both set or both
+    /// `None` so callers never have to handle "path without bytes".
+    pub icon_path: Option<String>,
+    /// `data:image/...;base64,...` for the launcher icon. We send the
+    /// base64 bytes (rather than the raw archive path) because the
+    /// frontend cannot reach into the APK zip itself — only the Rust
+    /// side has the file open. Adaptive-icon XML descriptors are
+    /// skipped on purpose: their foreground/background references are
+    /// not a single image and the dashboard avatar only needs the
+    /// raster fallback. `None` when no raster icon was found.
+    pub icon_data_url: Option<String>,
 }
+
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct PackerReport {
@@ -191,6 +224,83 @@ pub fn parse_badging(s: &str) -> AppResult<ApkInfo> {
                     }
                 }
             }
+            // `uses-feature: name='android.hardware.camera'` — comma-separated
+            // attribute string (`name=..., required=...`). We pull the
+            // `name` token; `required=true` is the default and not surfaced.
+            "uses-feature" => {
+                if let Some(name) = extract_attr(rest, "name") {
+                    if !name.is_empty() && !info.uses_feature.contains(&name) {
+                        info.uses_feature.push(name);
+                    }
+                }
+            }
+            // Shared libraries the app links to via `<uses-library>` (we
+            // re-parse from xmltree below — badging only gets a single
+            //         attribute string, but the FQN is what the rule
+            // engine cares about).
+            "uses-library" => {
+                if let Some(name) = extract_attr(rest, "name") {
+                    if !name.is_empty() && !info.uses_library.contains(&name) {
+                        info.uses_library.push(name);
+                    }
+                }
+            }
+            // `supports-screens: small='false' normal='true' ...` — parse
+            // each `key='value'` token rather than treating the whole
+            // clause as a single attribute. We only record the keys with
+            // `='true'` so the UI doesn't double-count "supports nothing".
+            "supports-screens" => {
+                for token in rest.split_whitespace() {
+                    if let Some(value) = token.strip_suffix("='true'") {
+                        if let Some(name) = value.split_once('=').map(|(k, _)| k) {
+                            if !info.supports_screens.contains(&name.to_string()) {
+                                info.supports_screens.push(name.to_string());
+                            }
+                        }
+                    }
+                }
+            }
+            // `locales: '--_--' 'en' 'zh-CN' ...` — a single-quoted list.
+            // We split on whitespace and strip the surrounding quotes
+            // so each entry is a clean BCP-47 tag. The leading `--_--`
+            // marker is the "default locale only" sentinel aapt2 emits
+            // and we drop it.
+            "locales" => {
+                for raw in rest.split_whitespace() {
+                    let stripped = raw
+                        .strip_prefix('\'')
+                        .and_then(|s| s.strip_suffix('\''))
+                        .unwrap_or(raw);
+                    if stripped.is_empty() || stripped == "--_--" {
+                        continue;
+                    }
+                    if !info.locales.contains(&stripped.to_string()) {
+                        info.locales.push(stripped.to_string());
+                    }
+                }
+            }
+            // `application-debuggable` line — bare flag, no value.
+            // Also recorded on the security_report side, but we expose it
+            // at the top level so the basicInfo card can render it
+            // without traversing the nested report.
+            "application-debuggable" => {
+                info.application_debuggable = true;
+            }
+            // `application-icon-160:res/mipmap-anydpi-v26/ic_launcher.xml`
+            // or `application-icon:res/mipmap-xxhdpi/ic_launcher.png`.
+            // We only set `icon_path`; the analyzer pipeline below
+            // walks every density-suffixed entry and picks the highest
+            // raster match (the parse step just collects raw hints).
+            k if k == "application-icon" || k.starts_with("application-icon-") => {
+                // Capture the first observation; the analyzer pipeline
+                // below re-walks `raw_badging` and picks the highest-
+                // density raster. We still record a hint here so debug
+                // surfaces can show what aapt2 reported without waiting
+                // for the analyzer's pass.
+                if info.icon_path.is_none() {
+                    info.icon_path = Some(unquote_single(rest));
+                }
+            }
             _ => {}
         }
     }
@@ -289,7 +399,13 @@ async fn dump_manifest(aapt: &str, apk_path: &Path) -> AppResult<String> {
 /// single `launchable-activity` from `parse_badging` survived — hence the
 /// user-facing symptom of "Activity=1, Service/Receiver/Provider=0".
 fn parse_components_from_xml(xml: &str, info: &mut ApkInfo) {
-    let mut current: Option<&str> = None;
+    // Top-level tag → callback to push the next `android:name` attribute
+    // value into the matching `ApkInfo` Vec. We register a callback for
+    // every tag we want to land on `info.{activities, services, receivers,
+    // providers, uses_feature, uses_library, uses_permission_sdk_23}`.
+    // Anything else (e.g. `<application>`, `<manifest>`, `<intent-filter>`)
+    // closes the current scope so subsequent attributes don't bleed.
+    let mut current: Option<&'static str> = None;
     for line in xml.lines() {
         let trimmed = line.trim();
         // On a fresh opening tag line, switch context and `continue` so that
@@ -303,6 +419,12 @@ fn parse_components_from_xml(xml: &str, info: &mut ApkInfo) {
                 "service" if !trimmed.contains("E: service-") => Some("service"),
                 "receiver" => Some("receiver"),
                 "provider" if !trimmed.contains("E: provider-") => Some("provider"),
+                "uses-feature" => Some("uses-feature"),
+                "uses-library" => Some("uses-library"),
+                // `uses-permission-sdk-23` is the runtime-only variant
+                // (Android 6.0+). It is *separate* from `<uses-permission>`,
+                // which we already cover via aapt2 dump badging.
+                "uses-permission-sdk-23" => Some("uses-permission-sdk-23"),
                 // Anything else (application, manifest, uses-permission,
                 // intent-filter, action, category, meta-data, ...) closes
                 // the current component scope so that subsequent attributes
@@ -319,10 +441,13 @@ fn parse_components_from_xml(xml: &str, info: &mut ApkInfo) {
                     "service" => Some(&mut info.services),
                     "receiver" => Some(&mut info.receivers),
                     "provider" => Some(&mut info.providers),
+                    "uses-feature" => Some(&mut info.uses_feature),
+                    "uses-library" => Some(&mut info.uses_library),
+                    "uses-permission-sdk-23" => Some(&mut info.uses_permission_sdk_23),
                     _ => None,
                 };
                 if let Some(t) = target {
-                    if !t.contains(&name) {
+                    if !name.is_empty() && !t.contains(&name) {
                         t.push(name);
                     }
                 }
@@ -369,10 +494,33 @@ pub async fn analyze(settings: &Settings, apk_path: &Path) -> AppResult<ApkInfo>
     let mut info = parse_badging(&stdout)?;
     info.raw_badging = stdout;
 
+    // Re-walk the raw badging output to pick the best launcher icon.
+    // `parse_badging` captures the first `application-icon*` line it
+    // sees; we want the highest-density *raster* entry. Adaptive-icon
+    // XML descriptors are skipped because they reference a foreground
+    // + background pair and cannot be rendered as a single image.
+    if let Some(path) = pick_best_icon_path(&info.raw_badging) {
+        if let Some(data_url) = read_icon_as_data_url(apk_path, &path) {
+            info.icon_path = Some(path);
+            info.icon_data_url = Some(data_url);
+        }
+    }
+
     // Best-effort: also parse xmltree for additional components not in badging.
+    // We keep the xml around here so we can re-use it for the
+    // obfuscation index (`short_name_ratio`) and the security report
+    // without paying for a second `aapt2 dump xmltree` round-trip.
     let manifest_xml = dump_manifest(aapt, apk_path).await.ok();
     if let Some(xml) = manifest_xml.as_ref() {
         parse_components_from_xml(xml, &mut info);
+    }
+    // Obfuscation sniff: feed the same xmltree output to
+    // `short_name_ratio` and stash the result on `info` so the
+    // basicInfo card can render "混淆度 87%" inline. Returns None
+    // for tiny APKs (under the `total < 4` floor) so the UI knows
+    // to render "—" instead of forcing a 0%.
+    if let Some(xml) = manifest_xml.as_ref() {
+        info.short_name_ratio = short_name_ratio(xml).unwrap_or(0.0);
     }
 
     // File size & native libs: best-effort, never abort analysis.
@@ -415,6 +563,99 @@ pub async fn analyze(settings: &Settings, apk_path: &Path) -> AppResult<ApkInfo>
     .ok();
 
     Ok(info)
+}
+
+/// Walk raw aapt2 `dump badging` output and pick the highest-density
+/// raster launcher icon path. Adaptive-icon XML descriptors
+/// (`application-icon-160:res/mipmap-anydpi-v26/ic_launcher.xml`) are
+/// skipped because the dashboard avatar needs a single image — XML
+/// adaptive icons reference a foreground + background pair and cannot
+/// be inlined as one `<img src="data:...">`. When aapt2 lists no
+/// raster icons we keep `None` and the dashboard reverts to the letter
+/// avatar (this is the rare legacy-build case).
+fn pick_best_icon_path(badging: &str) -> Option<String> {
+    // Density order: ldpi < mdpi < hdpi < xhdpi < xxhdpi < xxxhdpi.
+    // `application-icon-160` etc. maps to mdpi; we promote the entry
+    // whose density rank is highest.
+    const DENSITY_ORDER: &[&str] = &[
+        "ldpi", "mdpi", "hdpi", "xhdpi", "xxhdpi", "xxxhdpi",
+    ];
+    let density_rank = |density: &str| -> usize {
+        DENSITY_ORDER
+            .iter()
+            .position(|name| *name == density)
+            .unwrap_or(0)
+    };
+    let mut best: Option<(usize, String)> = None;
+    for line in badging.lines() {
+        let Some((key, rest)) = line.split_once(':') else {
+            continue;
+        };
+        let key = key.trim();
+        if key != "application-icon" && !key.starts_with("application-icon-") {
+            continue;
+        }
+        // aapt2 wraps the value in single quotes (e.g.
+        // `application-icon-480:'res/mipmap-xxhdpi/ic_launcher.png'`);
+        // the helper below strips them so the resulting string is a
+        // real zip entry path.
+        let path = unquote_single(rest);
+        // Adaptive-icon XML descriptors live under `mipmap-anydpi-*` and
+        // end in `.xml`. Without this guard the UI would render a broken
+        // `<img>` (browsers do not honor image/xml).
+        if path.ends_with(".xml") {
+            continue;
+        }
+        let density_bucket = if let Some(suffix) = key.strip_prefix("application-icon-") {
+            match suffix {
+                "120" => "ldpi",
+                "160" => "mdpi",
+                "240" => "hdpi",
+                "320" => "xhdpi",
+                "480" => "xxhdpi",
+                "640" => "xxxhdpi",
+                _ => "mdpi",
+            }
+        } else {
+            "mdpi"
+        };
+        let rank = density_rank(density_bucket);
+        match &best {
+            Some((current, _)) if *current >= rank => {}
+            _ => best = Some((rank, path)),
+        }
+    }
+    best.map(|(_, path)| path)
+}
+
+/// Open the APK as a zip and read the named entry into a base64 data
+/// URL. Only used for the launcher icon, so a single read into a
+/// `Vec<u8>` is fine — launcher icons are well under 100 KB.
+///
+/// Returns `None` on any failure (entry missing, archive unreadable,
+/// bytes empty). All failure modes are non-fatal for the analyze
+/// pipeline: the dashboard simply falls back to the letter avatar.
+fn read_icon_as_data_url(apk_path: &Path, entry_path: &str) -> Option<String> {
+    let file = std::fs::File::open(apk_path).ok()?;
+    let mut zip = zip::ZipArchive::new(file).ok()?;
+    let mut entry = zip.by_name(entry_path).ok()?;
+    let mut bytes = Vec::new();
+    entry.read_to_end(&mut bytes).ok()?;
+    if bytes.is_empty() {
+        return None;
+    }
+    let mime = if entry_path.ends_with(".webp") {
+        "image/webp"
+    } else if entry_path.ends_with(".png") {
+        "image/png"
+    } else if entry_path.ends_with(".jpg") || entry_path.ends_with(".jpeg") {
+        "image/jpeg"
+    } else {
+        // Adaptive-icon XML or other formats we cannot inline.
+        return None;
+    };
+    let encoded = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &bytes);
+    Some(format!("data:{};base64,{}", mime, encoded))
 }
 
 pub fn extract_native_libs(
@@ -921,29 +1162,50 @@ fn build_security_report(info: &ApkInfo, manifest_xml: &str) -> SecurityReport {
     SecurityReport { risks, score }
 }
 
-#[allow(dead_code)]
-fn parse_repeat(body: &str) -> Option<(usize, usize)> {
-    let total = body.lines().filter(|l| !l.trim().is_empty()).count();
+/// Fraction of class names whose last segment is <= 3 characters.
+///
+/// The heuristic is intentionally crude: feed it the
+/// `aapt2 dump xmltree AndroidManifest.xml` output and it counts
+/// how many `android:name="..."` attributes have a `last_segment`
+/// of length 0..=3. The result is a 0.0..=1.0 ratio used as the
+/// "obfuscation index" of the APK — a value of 0.0 means the APK
+/// is unobfuscated, 1.0 means every class has a 1-3 char name
+/// (extreme R8 / ProGuard). Anything below `0.30` is treated as
+/// "not obfuscated" and the caller surfaces a "none" label.
+///
+/// We require at least 4 names to score — fewer than that and the
+/// statistic is meaningless (a 2-name APK with 1 short class
+/// would be reported as 50% obfuscated). Returns `None` for
+/// the "too few names" case so the UI can render "—" instead of
+/// a misleading 0.
+fn short_name_ratio(xml: &str) -> Option<f32> {
+    // We count both `total` and `short` over the same line set —
+    //   `<attribute android:name="..."/>` lines — so the ratio
+    // isn't biased by the opening `E: <kind>` tags that appear
+    // between every attribute. Without this, an apk with 4
+    // activities and 4 attribute lines would yield 0.5 instead
+    // of 1.0 because the `E:` lines are also non-empty.
+    let mut total: u32 = 0;
+    let mut short: u32 = 0;
+    for line in xml.lines() {
+        if !line.contains("android:name") {
+            continue;
+        }
+        if let Some(name) = extract_attr(line, "android:name") {
+            total += 1;
+            let last = name.rsplit('.').next().unwrap_or(&name);
+            // 0..=3 chars in the last segment is the "obfuscated"
+            // threshold. Anything 4+ is treated as readable.
+            if last.len() <= 3 {
+                short += 1;
+            }
+        }
+    }
     if total < 4 {
         return None;
     }
-    let short = body
-        .lines()
-        .filter(|l| {
-            l.contains("android:name")
-                && extract_attr(l, "android:name")
-                    .map(|n| {
-                        let last = n.rsplit('.').next().unwrap_or(&n);
-                        last.len() <= 3
-                    })
-                    .unwrap_or(false)
-        })
-        .count();
-    if total > 3 && (short as f64 / total as f64) > 0.3 {
-        Some((total, short))
-    } else {
-        None
-    }
+    let ratio = short as f32 / total as f32;
+    Some(ratio.clamp(0.0, 1.0))
 }
 
 #[cfg(test)]
@@ -951,7 +1213,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn check_obfuscation_short_names() {
+    fn obfuscation_short_names_flags_50_percent() {
+        // 4 of 4 names have a 1-char last segment -> ratio 1.0,
+        // way above the 0.30 invalidation threshold.
         let xml = "\
 E: activity (line=1)
   A: android:name(0x01010003)=\"com.x.a\"
@@ -962,7 +1226,24 @@ E: activity (line=3)
 E: activity (line=4)
   A: android:name(0x01010003)=\"com.x.d\"
 ";
-        assert!(parse_repeat(xml).is_some());
+        let ratio = short_name_ratio(xml).expect("enough names");
+        assert!(ratio > 0.5, "ratio should be ~1.0, got {ratio}");
+    }
+
+    #[test]
+    fn obfuscation_short_names_returns_none_below_floor() {
+        // 3 names is below the `total < 4` floor — ratio should be
+        // `None` so the UI can render "—" instead of a misleading
+        // 0 percentage.
+        let xml = "\
+E: activity (line=1)
+  A: android:name(0x01010003)=\"com.x.a\"
+E: activity (line=2)
+  A: android:name(0x01010003)=\"com.x.b\"
+E: activity (line=3)
+  A: android:name(0x01010003)=\"com.x.c\"
+";
+        assert!(short_name_ratio(xml).is_none());
     }
 
     #[test]

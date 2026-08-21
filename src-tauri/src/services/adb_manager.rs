@@ -158,7 +158,7 @@ fn adb_binary(settings: &Settings) -> AppResult<&str> {
 }
 
 /// Run an adb subcommand. `serial` is an optional `-s <device>` selector.
-async fn run_adb(settings: &Settings, serial: Option<&str>, args: &[&str]) -> AppResult<String> {
+pub(crate) async fn run_adb(settings: &Settings, serial: Option<&str>, args: &[&str]) -> AppResult<String> {
     let adb = adb_binary(settings)?.to_string();
     let mut cmd = Command::new(&adb);
     if let Some(s) = serial {
@@ -186,6 +186,41 @@ async fn run_adb(settings: &Settings, serial: Option<&str>, args: &[&str]) -> Ap
         });
     }
     Ok(if stdout.is_empty() { stderr } else { stdout })
+}
+
+/// Same as [`run_adb`] but returns the raw stdout bytes without any
+/// UTF-8 transcoding. Use this whenever the command output is binary
+/// (e.g. `adb exec-out cat <png>` for icon streaming) -- the lossy
+/// `String::from_utf8_lossy` in `run_adb` would corrupt the bytes by
+/// replacing invalid UTF-8 sequences with U+FFFD, breaking PNGs that
+/// contain high-byte pixels.
+pub(crate) async fn run_adb_bytes(
+    settings: &Settings,
+    serial: Option<&str>,
+    args: &[&str],
+) -> AppResult<Vec<u8>> {
+    let adb = adb_binary(settings)?.to_string();
+    let mut cmd = Command::new(&adb);
+    if let Some(s) = serial {
+        cmd.arg("-s").arg(s);
+    }
+    for a in args {
+        cmd.arg(a);
+    }
+    cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
+    let output = cmd
+        .output()
+        .await
+        .map_err(|e| AppError::Config(format!("spawn adb: {e}")))?;
+    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+    if !output.status.success() {
+        return Err(AppError::ToolFailed {
+            tool: "adb".into(),
+            code: output.status.code().unwrap_or(-1),
+            msg: stderr,
+        });
+    }
+    Ok(output.stdout)
 }
 
 /// Run an `adb shell ...` command and return its stdout.
@@ -297,6 +332,72 @@ pub async fn disconnect(settings: &Settings, target: Option<&str>) -> AppResult<
         _ => run_adb(settings, None, &["disconnect"]).await?,
     };
     Ok(out.trim().to_string())
+}
+
+/// Same as [`list_packages`] but returns full [`AppInfo`] rows parsed
+/// from `pm list packages -f` output. Used as the slow-path fallback
+/// when the on-device agent can't run (e.g. framework JNI signature
+/// mismatch on a specific Android build, OEM `app_process` lockdown).
+///
+/// Metadata fields the shell path can't cheaply give us -- label,
+/// version, icon, APK size, debuggable flag -- stay `None` here; the
+/// frontend's per-package enrichment fills them in lazily.
+pub async fn list_packages_via_shell(
+    settings: &Settings,
+    device: &str,
+    include_system: bool,
+) -> AppResult<Vec<AppInfo>> {
+    let flag = if include_system { "" } else { "-3" };
+    let mut args: Vec<&str> = vec!["pm", "list", "packages", "-f"];
+    if !flag.is_empty() {
+        args.push(flag);
+    }
+    let out = run_adb_shell(settings, device, &args).await?;
+    let mut infos: Vec<AppInfo> = Vec::new();
+    for line in out.lines() {
+        // Format: `package:/data/app/~~xxx/com.foo-1/base.apk=com.foo`
+        let Some(rest) = line.trim().strip_prefix("package:") else {
+            continue;
+        };
+        // rsplit_once so package names containing `=` (none in practice)
+        // still parse. APK path is everything before the last `=`.
+        let Some((apk_path, package_name)) = rest.rsplit_once('=') else {
+            continue;
+        };
+        if package_name.is_empty() || apk_path.is_empty() {
+            continue;
+        }
+        // Best-effort system-app classification from the install path.
+        // `/system/`, `/vendor/`, `/product/`, `/apex/` are system mounts.
+        let is_system = apk_path.starts_with("/system/")
+            || apk_path.starts_with("/vendor/")
+            || apk_path.starts_with("/product/")
+            || apk_path.starts_with("/apex/");
+        infos.push(AppInfo {
+            package_name: package_name.to_string(),
+            app_label: None,
+            version_name: None,
+            version_code: None,
+            min_sdk: None,
+            target_sdk: None,
+            apk_path: Some(apk_path.to_string()),
+            apk_total_size: None,
+            apk_count: 1,
+            icon_path: None,
+            icon_data_url: None,
+            is_system,
+            is_debuggable: false,
+        });
+    }
+    // User apps first (matches the agent path's sort), then alpha.
+    infos.sort_by(|a, b| {
+        match (a.is_system, b.is_system) {
+            (true, false) => std::cmp::Ordering::Greater,
+            (false, true) => std::cmp::Ordering::Less,
+            _ => a.package_name.cmp(&b.package_name),
+        }
+    });
+    Ok(infos)
 }
 
 pub async fn list_packages(
@@ -556,14 +657,49 @@ fn parse_dumpsys_for_label_version(stdout: &str, info: &mut AppInfo) {
     }
 }
 
-/// Returns a flag indicating whether `package` looks like a system app.
-async fn is_system_package(settings: &Settings, device: &str, package: &str) -> AppResult<bool> {
-    let out = run_adb_shell(settings, device, &["pm", "list", "packages", "-s"]).await?;
-    Ok(out
-        .lines()
-        .any(|l| l.trim() == format!("package:{package}")))
+/// Per-package info via shell-only: `dumpsys package` for label/version/sdk/debuggable/codePath
+/// + `pm path` + `wc -c <path>` for apk_count / apk_total_size. **No APK
+/// pull, no aapt2.** Use this for the per-card enrichment waterfall in
+/// AdbAppsTab; the heavy `package_info` is reserved for callers that
+/// actually need the APK on disk (jadx / analyze / decompile).
+pub async fn package_info_lite(
+    _app: &AppHandle,
+    settings: &Settings,
+    device: &str,
+    package: &str,
+) -> AppResult<AppInfo> {
+    if package.trim().is_empty() {
+        return Err(AppError::InvalidInput("package is empty".into()));
+    }
+
+    let mut info = AppInfo {
+        package_name: package.to_string(),
+        ..Default::default()
+    };
+
+    // 1) `dumpsys package` -- authoritative live state for label/version/sdk/etc.
+    if let Ok(dump) = run_adb_shell(settings, device, &["dumpsys", "package", package]).await {
+        parse_dumpsys_for_label_version(&dump, &mut info);
+    }
+
+    // 2) `pm path` for APK path(s) + count
+    if let Ok(paths_out) = run_adb_shell(settings, device, &["pm", "path", package]).await {
+        let remotes = parse_apk_paths(&paths_out);
+        info.apk_count = remotes.len();
+        if let Some(first) = remotes.first() {
+            // Only set apk_path if dumpsys didn't already surface codePath=.
+            if info.apk_path.is_none() {
+                info.apk_path = Some(first.clone());
+            }
+        }
+        // 3) `wc -c <path>` per remote for total size.
+        info.apk_total_size = apk_sizes_for(settings, device, &remotes).await;
+    }
+
+    Ok(info)
 }
 
+/// Returns a flag indicating whether `package` looks like a system app.
 pub async fn package_info(
     app: &AppHandle,
     settings: &Settings,
@@ -655,9 +791,17 @@ pub async fn package_info(
         }
     }
 
-    // 5) System-app classification (best-effort).
-    if let Ok(sys) = is_system_package(settings, device, package).await {
-        info.is_system = sys;
+    // 5) System-app classification. dumpsys doesn't surface FLAG_SYSTEM
+    //    directly, so we use the install path: anything under /system/,
+    //    /vendor/, /product/, or /apex/ is a system app. This matches the
+    //    shell-fallback path in `list_packages_via_shell` and avoids the
+    //    `pm list packages -s` round-trip that `is_system_package` would
+    //    do per call.
+    if let Some(p) = info.apk_path.as_deref() {
+        info.is_system = p.starts_with("/system/")
+            || p.starts_with("/vendor/")
+            || p.starts_with("/product/")
+            || p.starts_with("/apex/");
     }
 
     Ok(info)
@@ -2050,6 +2194,53 @@ pub async fn force_stop(
     Ok(out.trim().to_string())
 }
 
+/// Reboot a device. `mode` is one of `None` (normal reboot),
+/// `Some("recovery")`, or `Some("bootloader")`. Runs as the top-level
+/// `adb reboot [mode]` -- NOT `adb shell reboot`, because shell uid
+/// doesn't have permission to issue the reboot syscall on most
+/// Android builds.
+pub async fn power_reboot(
+    settings: &Settings,
+    device: &str,
+    mode: Option<&str>,
+) -> AppResult<String> {
+    let mut args: Vec<&str> = vec!["reboot"];
+    if let Some(m) = mode {
+        match m {
+            "recovery" | "bootloader" => args.push(m),
+            other => {
+                return Err(AppError::InvalidInput(format!(
+                    "unknown reboot mode: {other}"
+                )));
+            }
+        }
+    }
+    let out = run_adb(settings, Some(device), &args).await?;
+    Ok(out.trim().to_string())
+}
+
+/// Power off the device. Tries `adb reboot -p` (the standard "soft
+/// poweroff" command) and falls back to `input keyevent 26` (power
+/// button press → screen off) if the device rejects the syscall. The
+/// `keyevent` fallback doesn't actually shut the phone down, but at
+/// least the screen goes dark and the user gets a clear signal the
+/// action went through.
+pub async fn power_shutdown(settings: &Settings, device: &str) -> AppResult<String> {
+    match run_adb(settings, Some(device), &["reboot", "-p"]).await {
+        Ok(out) => Ok(out.trim().to_string()),
+        Err(primary) => {
+            let fallback = run_adb_shell(
+                settings,
+                device,
+                &["input", "keyevent", "26"],
+            )
+            .await
+            .map_err(|_| primary)?;
+            Ok(fallback.trim().to_string())
+        }
+    }
+}
+
 /// Launch an application's desktop entry through Android's launcher category.
 pub async fn launch_app(
     settings: &Settings,
@@ -2096,11 +2287,35 @@ pub async fn list_remote_dir(
     as_pkg: Option<&str>,
     use_root: bool,
 ) -> AppResult<Vec<DirEntry>> {
-    let cmd = ["ls", "-la", path];
+    // Append a trailing `/` so `ls -la` treats the path unambiguously
+    // as a directory. Without it, when the path is a symlink (e.g.
+    // `/sdcard` → `/storage/self/primary` on Android), `ls -la /sdcard`
+    // prints the symlink itself as a single line — not the contents —
+    // because Android's `ls` (toybox) inherits the standard POSIX
+    // behaviour of `lstat`-ing the path argument. The trailing slash
+    // forces `ls` to follow the symlink and list the target's contents,
+    // which is what the UI expects. For regular directories the
+    // trailing slash is a no-op.
+    let path_arg = format!("{}/", path.trim_end_matches('/'));
+    // Quote the path so the device shell does NOT interpret glob
+    // characters (`?`, `*`, `[`, `]`) as wildcards. Path components
+    // on Android can legitimately contain these — for example, a
+    // device may have a symlink literally named `?` in `/` and the
+    // user may click it. Without quoting, `ls -la /?/` arrives at the
+    // device shell as a literal string, mksh expands `/?` to any
+    // single-character directory in `/` (e.g. `/o` on Android 14+
+    // system_ext), and the user gets a confusing "Permission denied"
+    // toast for a path they never asked to open. `shell_quote` wraps
+    // the argument in single quotes; the device shell strips them
+    // before passing the path to `ls`, so `?` is treated as a literal
+    // character. This mirrors what `run_root_shell` already does for
+    // `su -c '...'`.
+    let quoted_path = shell_quote(&path_arg);
+    let cmd = ["ls", "-la", &quoted_path];
     let out = run_fs_shell(settings, device, as_pkg, use_root, &cmd).await?;
     Ok(out
         .lines()
-        .filter_map(|line| parse_ls_line(line, path))
+        .filter_map(|line| parse_ls_line(line, &path_arg))
         .collect())
 }
 
@@ -2134,7 +2349,15 @@ pub async fn resolve_app_data_dir(
     candidates.dedup();
     let mut last_error = None;
     for path in candidates {
-        match run_fs_shell(settings, device, as_pkg, use_root, &["ls", "-ld", &path]).await {
+        match run_fs_shell(
+            settings,
+            device,
+            as_pkg,
+            use_root,
+            &["ls", "-ld", &shell_quote(&path)],
+        )
+        .await
+        {
             Ok(_) => return Ok(path),
             Err(error) => last_error = Some(error),
         }
@@ -2196,7 +2419,10 @@ pub async fn delete_remote_file(
     as_pkg: Option<&str>,
     use_root: bool,
 ) -> AppResult<String> {
-    let cmd = ["rm", "-rf", path];
+    // `shell_quote` so the device shell does not interpret glob chars
+    // in `path` (e.g. a user-typed name with `?` or `*`). See the
+    // matching comment in `list_remote_dir` for the full rationale.
+    let cmd = ["rm", "-rf", &shell_quote(path)];
     let out = run_fs_shell(settings, device, as_pkg, use_root, &cmd).await?;
     Ok(out.trim().to_string())
 }
@@ -2247,11 +2473,13 @@ async fn push_via_root(
         basename
     );
     if let Err(error) = push_direct(settings, device, local_path, &tmp_path).await {
-        let _ = run_adb_shell(settings, device, &["rm", "-f", &tmp_path]).await;
+        let _ = run_adb_shell(settings, device, &["rm", "-f", &shell_quote(&tmp_path)]).await;
         return Err(error);
     }
+    // `run_root_shell` already wraps each arg in `shell_quote`, so
+    // `remote_path` is safe even with glob chars.
     let result = run_root_shell(settings, device, &["cp", &tmp_path, remote_path]).await;
-    let _ = run_adb_shell(settings, device, &["rm", "-f", &tmp_path]).await;
+    let _ = run_adb_shell(settings, device, &["rm", "-f", &shell_quote(&tmp_path)]).await;
     result
 }
 
@@ -2316,17 +2544,25 @@ async fn push_via_identity(
         basename
     );
     // 1. Stage to /data/local/tmp/. If the staging push fails, cleanup any
-    //    partial file and surface the error.
+    //    partial file and surface the error. `tmp_path` is JADB-generated
+    //    so it has no user-controlled chars, but we quote anyway for
+    //    consistency with the cleanup below.
     if let Err(e) = push_direct(settings, device, local_path, &tmp_path).await {
-        let _ = run_adb_shell(settings, device, &["rm", "-f", &tmp_path]).await;
+        let _ = run_adb_shell(settings, device, &["rm", "-f", &shell_quote(&tmp_path)]).await;
         return Err(e);
     }
+    // `tmp_path` is a JADB-generated name (no user input) but we still
+    // quote it for consistency. `remote_path` is user-supplied — quote
+    // it so the device shell does not interpret glob chars in the target
+    // path.
+    let tmp_quoted = shell_quote(&tmp_path);
+    let remote_quoted = shell_quote(remote_path);
     let mut cp_args = identity.to_vec();
-    cp_args.extend_from_slice(&["cp", &tmp_path, remote_path]);
+    cp_args.extend_from_slice(&["cp", &tmp_quoted, &remote_quoted]);
     let cp_result = run_adb_shell(settings, device, &cp_args).await;
     // 3. Best-effort cleanup of the staged file (run both shells; one will
     //    succeed depending on where the temp actually landed).
-    let _ = run_adb_shell(settings, device, &["rm", "-f", &tmp_path]).await;
+    let _ = run_adb_shell(settings, device, &["rm", "-f", &shell_quote(&tmp_path)]).await;
     cp_result
 }
 
@@ -2738,7 +2974,7 @@ pub async fn pull_app_icon(
 }
 
 /// Minimal, dependency-free base64 encoder so we don't pull in another crate.
-fn base64_encode(input: &[u8]) -> String {
+pub(crate) fn base64_encode(input: &[u8]) -> String {
     const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::with_capacity(usize::div_ceil(input.len() + 2, 3) * 4);
     let mut i = 0;

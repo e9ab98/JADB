@@ -267,6 +267,7 @@ pub async fn create_new(
             "-keysize", &key_size.to_string(),
             "-validity", &validity_days.to_string(),
             "-keystore", &dest_str,
+            "-storetype", "JKS",
             "-storepass", &keystore_password,
             "-keypass", &key_password,
             "-dname", &dname_arg,

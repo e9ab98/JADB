@@ -170,7 +170,11 @@ export function FileManagerTab({ serial, rootPath, asPkg = null, useRoot = null 
   }, [serial, asPkg, useRootState, rootPath, probeDone]);
 
   async function handleEntryClick(entry: DirEntry) {
-    if (entry.kind !== 'dir') return;
+    // Treat symlinks the same as directories: clicking a link runs
+    // `ls -la <link>` on the device, which the kernel resolves to list
+    // the target's contents. This is what `ls /sdcard` already does on
+    // Android when /sdcard is a symlink to /storage/emulated/0.
+    if (entry.kind !== 'dir' && entry.kind !== 'link') return;
     setLoading(true);
     setError(null);
     const mode = useRootRef.current;
@@ -294,7 +298,7 @@ export function FileManagerTab({ serial, rootPath, asPkg = null, useRoot = null 
     (rootPath === '/' ? currentPath !== '/' : currentPath.startsWith(rootPath));
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-3">
+    <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-2">
         <div className="flex min-w-0 flex-1 items-center gap-1.5 rounded-md border border-border bg-bg-1 px-3 py-1.5 font-mono text-xs text-text-1">
           <FolderIcon className="h-3 w-3 shrink-0 text-text-2" />
@@ -390,8 +394,8 @@ export function FileManagerTab({ serial, rootPath, asPkg = null, useRoot = null 
           </CardContent>
         </Card>
       ) : entries ? (
-        <Card className="flex-1 overflow-hidden">
-          <div className="max-h-full overflow-auto">
+        <Card className="overflow-hidden">
+          <div className="overflow-auto">
             <table className="w-full text-sm">
               <thead className="sticky top-0 bg-bg-1 text-xs uppercase tracking-wide text-text-2">
                 <tr>
@@ -492,21 +496,31 @@ function EntryRow({
       : entry.kind === 'link'
         ? LinkIcon
         : FileIcon;
-  const isDir = entry.kind === 'dir';
+  // Navigation-eligible: directories and symlinks-to-directories. Both
+  // should respond to click, show hover, and use the brand accent color.
+  // The on-device `ls` will resolve the symlink for us.
+  const isNav = entry.kind === 'dir' || entry.kind === 'link';
+  // For symlinks, `ls -la` reports the linknamelen as size — that's
+  // almost never what the user wants to see, so we render `—` like dirs.
+  const showSize = entry.kind !== 'dir' && entry.kind !== 'link';
+  const rowTitle = entry.linkTarget
+    ? t('dataDir.openLinkTooltip', { target: entry.linkTarget })
+    : undefined;
   return (
     <tr
       className={cn(
         'border-t border-border transition-colors',
-        isDir && 'cursor-pointer hover:bg-bg-2',
+        isNav && 'cursor-pointer hover:bg-bg-2',
       )}
-      onClick={isDir ? onOpen : undefined}
+      onClick={isNav ? onOpen : undefined}
+      title={rowTitle}
     >
       <td className="px-3 py-2">
         <div className="flex min-w-0 items-center gap-2">
           <Icon
             className={cn(
               'h-4 w-4 shrink-0',
-              isDir ? 'text-brand' : 'text-text-2',
+              isNav ? 'text-brand' : 'text-text-2',
             )}
           />
           <span className="shrink-0" title={entry.name}>
@@ -523,7 +537,7 @@ function EntryRow({
         {entry.permissions}
       </td>
       <td className="px-3 py-2 text-right font-mono text-xs text-text-2">
-        {isDir ? '—' : formatBytes(entry.size)}
+        {showSize ? formatBytes(entry.size) : '—'}
       </td>
       <td className="px-3 py-2 font-mono text-xs text-text-2">
         {entry.modified}

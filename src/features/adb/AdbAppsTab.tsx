@@ -36,15 +36,14 @@ import {
 } from '@/components/ui/dialog';
 import { Switch } from '@/components/ui/switch';
 import {
-  adbAppIcon,
+  adbAppIconViaAgent,
   adbApkPaths,
   adbPullApkForTool,
-  adbAppInfo,
+  adbAppInfoLite,
   adbClearCache,
   adbExportApks,
   adbForceStop,
   adbLaunchApp,
-  adbListPackages,
   adbUninstall,
   isDeviceRooted,
   listRemoteDir,
@@ -53,6 +52,7 @@ import {
 } from '@/ipc/adb';
 import { openAnalyzeWindow, openDataDirWindow, openDecompileWindow } from '@/ipc/window';
 import { launchJadxGui } from '@/ipc/jadx';
+import { usePackagesStore } from '@/store/packages';
 import { cn, formatBytes } from '@/lib/utils';
 
 type Props = {
@@ -113,41 +113,72 @@ export function AdbAppsTab({ serial }: Props) {
 
   // Limit concurrent adb calls so a 200-app device doesn't lock up the host.
   const ICON_CONCURRENCY = 6;
-  const INFO_CONCURRENCY = 4;
+  const INFO_CONCURRENCY = 12;
   const inFlightRef = useRef<Set<string>>(new Set());
+
+  const ensureLoaded = usePackagesStore((s) => s.ensureLoaded);
+
+  /**
+   * Hydrate an AppRow from an `AppInfo` returned by the on-device
+   * agent. Most fields come for free; icons still need a per-card
+   * pull (separate icon worker) and apkCount defaults to 1 because
+   * the agent doesn't enumerate split APKs.
+   */
+  function rowFromInfo(info: AppInfo, isSystem: boolean): AppRow {
+    return {
+      packageName: info.packageName,
+      appLabel: info.appLabel,
+      versionName: info.versionName,
+      versionCode: info.versionCode,
+      minSdk: info.minSdk,
+      targetSdk: info.targetSdk,
+      apkPath: info.apkPath,
+      apkTotalSize: info.apkTotalSize,
+      apkCount: info.apkCount > 0 ? info.apkCount : 1,
+      iconPath: info.iconPath,
+      iconDataUrl: info.iconDataUrl,
+      iconAttempted: false,
+      isSystem,
+      isDebuggable: info.isDebuggable,
+      iconLoading: false,
+    };
+  }
 
   const loadPackages = useCallback(async () => {
     if (!serial) return;
     setLoadingList(true);
     setListError(null);
     try {
-      const list = await adbListPackages(serial, includeSystem);
+      // Pull from the shared cache. The agent returns full AppInfo per
+      // package (label / version / size / sdk / debuggable / isSystem),
+      // so we hydrate AppRow directly -- no per-package dumpsys +
+      // pull + aapt2 round-trip needed.
+      await ensureLoaded(serial);
+      const all = usePackagesStore.getState().infosBySerial[serial] ?? [];
+      const filtered = includeSystem ? all : all.filter((info) => !info.isSystem);
       // Lock the visual order before any enrichment waterfall starts.
       // Locale-aware string compare is fine here because we only sort
       // once; later updates never re-sort.
-      const sorted = [...list].sort((a, b) => a.localeCompare(b));
+      // Lock the visual order once (later updates never re-sort).
+      const sorted = filtered.map((info) => info.packageName)
+        .sort((a, b) => a.localeCompare(b));
       setOrder(sorted);
       setApps((prev) => {
         const next = new Map<string, AppRow>();
-        for (const pkg of sorted) {
-          const existing = prev.get(pkg);
-          next.set(pkg, existing ?? {
-            packageName: pkg,
-            appLabel: null,
-            versionName: null,
-            versionCode: null,
-            minSdk: null,
-            targetSdk: null,
-            apkPath: null,
-            apkTotalSize: null,
-            apkCount: 0,
-            iconPath: null,
-            iconDataUrl: null,
-            iconAttempted: false,
-            isSystem: includeSystem ? false : true,
-            isDebuggable: false,
-            iconLoading: false,
-          });
+        for (const info of filtered) {
+          // Preserve the in-flight icon state if we already had a row
+          // for this package (e.g. user reloaded before icons finished).
+          const existing = prev.get(info.packageName);
+          next.set(
+            info.packageName,
+            existing
+              ? {
+                  ...rowFromInfo(info, info.isSystem),
+                  iconLoading: existing.iconLoading,
+                  iconAttempted: existing.iconAttempted,
+                }
+              : rowFromInfo(info, info.isSystem),
+          );
         }
         return next;
       });
@@ -221,7 +252,10 @@ export function AdbAppsTab({ serial }: Props) {
         inFlightRef.current.add(`info:${pkg}`);
         setInfoLoading((s) => new Set(s).add(pkg));
         try {
-          const info = await adbAppInfo(serial!, pkg);
+          // adbAppInfoLite uses dumpsys + pm path + wc only -- no APK
+          // pull, no aapt2. The heavy `adbAppInfo` (which DOES pull the
+          // APK) is reserved for the analyze/jadx/decompile tool flow.
+          const info = await adbAppInfoLite(serial!, pkg);
           if (cancelled) return;
           setApps((prev) => {
             const next = new Map(prev);
@@ -314,7 +348,17 @@ export function AdbAppsTab({ serial }: Props) {
           return next;
         });
         try {
-          const dataUrl = await adbAppIcon(serial!, pkg);
+          // Read the store cache first. `undefined` means "not in cache,
+          // go fetch"; `null` means "we already know this app has no icon";
+          // a string is the cached data URL we can use immediately.
+          const cache = usePackagesStore.getState();
+          const cached = cache.getCachedIcon(serial!, pkg);
+          let dataUrl: string | null;
+          if (cached !== undefined) {
+            dataUrl = cached;
+          } else {
+            dataUrl = await cache.fetchIcon(serial!, pkg, adbAppIconViaAgent);
+          }
           if (cancelled) return;
           iconAttemptedRef.current.add(pkg);
           setApps((prev) => {

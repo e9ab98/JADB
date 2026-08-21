@@ -14,6 +14,7 @@ export type Settings = {
   javaDir: string | null;
   rulesPath: string | null;
   rulesDownloadUrl: string | null;
+  licenseServerUrl?: string | null;
   language: Language;
   theme: ThemeMode;
 };
@@ -29,6 +30,7 @@ export type SettingsPatch = {
   javaDir?: string | null | undefined;
   rulesPath?: string | null | undefined;
   rulesDownloadUrl?: string | null | undefined;
+  licenseServerUrl?: string | null | undefined;
   language?: Language;
   theme?: ThemeMode;
 };

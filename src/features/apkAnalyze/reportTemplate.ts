@@ -219,8 +219,14 @@ function renderHeader(payload: ReportPayload): string {
   const tech = (apkInfo.tech_stack ?? [])
     .map((s) => `<span class="tech">${escapeHtml(s)}</span>`)
     .join('');
+  // Inlining the data URL keeps the exported HTML file self-contained —
+  // no relative paths to chase, no missing assets when the user moves
+  // the report between machines.
+  const iconHtml = apkInfo.iconDataUrl
+    ? `<img class="app-icon" src="${apkInfo.iconDataUrl}" alt="" />`
+    : `<div class="app-icon">${escapeHtml(initial)}</div>`;
   return `<div class="header">
-    <div class="app-icon">${escapeHtml(initial)}</div>
+    ${iconHtml}
     <div class="app-info">
       <h1>${escapeHtml(label)}</h1>
       <div class="badges">

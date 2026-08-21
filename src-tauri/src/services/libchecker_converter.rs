@@ -14,8 +14,15 @@
 //!   - receivers-libs     → kind=component_class, type=receiver
 //!   - providers-libs     → kind=component_class, type=provider
 //!   - actions-libs       → kind=action
-//!   - static-libs        → kind=manifest (heuristic substring match;
-//!     fallback for content not introspectable via aapt2)
+//!
+//! `static-libs` is intentionally skipped: its native `match.contains`
+//! needle is meaningless against `info.raw_badging` (the badging
+//! output doesn't contain package paths), so the matcher fires
+//! 0% of the time and just adds noise to the rule list. Proper
+//! static-library detection needs `<uses-library>` /
+//! `<uses-static-library>` parsing from the aapt2 xmltree output;
+//! re-introduce the category once the analyzer exposes those
+//! fields on `ApkInfo`.
 
 use crate::services::rule_manager::{Rule, RuleSet};
 use serde_json::{json, Value};
@@ -105,12 +112,6 @@ fn categories() -> Vec<(Vec<&'static str>, &'static str, &'static str, Builder)>
             "intent-actions",
             "Intent Actions",
             Box::new(convert_actions),
-        ),
-        (
-            vec!["static-libs", "static_libs", "static_lib", "static"],
-            "static-libraries",
-            "Static Libraries",
-            Box::new(convert_static_libs),
         ),
     ]
 }
@@ -239,35 +240,6 @@ fn convert_actions(dir: &Path) -> Vec<Rule> {
     out
 }
 
-fn convert_static_libs(dir: &Path) -> Vec<Rule> {
-    let mut out = Vec::new();
-    walk_json(dir, &mut |path, bytes| {
-        // Heuristic: the manifest kind does a substring search against
-        // `info.raw_badging`, which doesn't actually contain package
-        // paths. Static-library detection from a manifest alone is
-        // fundamentally lossy — v1 surfaces the rule so users get a
-        // signal, even if the match is noisy.
-        let needle = stem_from_json(path).unwrap_or_default();
-        if needle.is_empty() {
-            return;
-        }
-        let Some(mut rule) = lc_to_rule(bytes, &needle, |label, team, desc| Rule {
-            id: format!("static-{}", uuid_short_from_path(path)),
-            description: Some(format!("{label} — {team}: {desc}")),
-            severity: "info".into(),
-            kind: "manifest".into(),
-            match_: json!({ "contains": needle.clone() }),
-            metadata: None,
-        }) else {
-            return;
-        };
-        if let Some(d) = rule.description.as_mut() {
-            *d = format!("[static~{needle}] {d}");
-        }
-        out.push(rule);
-    });
-    out
-}
 
 // ---- shared helpers ----
 
@@ -308,12 +280,6 @@ fn class_fqn_from_json(root: &Path, json_path: &Path) -> Option<String> {
         return None;
     }
     Some(parts.join("."))
-}
-
-/// Extract the file stem of a JSON path as a flat string — used as the
-/// `match.contains` needle for static-libraries.
-fn stem_from_json(path: &Path) -> Option<String> {
-    path.file_stem().and_then(|s| s.to_str()).map(str::to_string)
 }
 
 fn uuid_short_from_path(path: &Path) -> String {

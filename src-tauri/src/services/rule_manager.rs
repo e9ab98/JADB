@@ -351,6 +351,57 @@ fn eval_action(rule: &Rule, info: &ApkInfo) -> (bool, Option<String>) {
     (false, None)
 }
 
+/// `<uses-feature>` matcher. Supports the same `name` field as
+/// `eval_action` — `match.name` is matched against every entry in
+/// `info.uses_feature`. Accepts glob-style wildcards (`*`) so a
+/// rule can pin all camera family features with
+/// `match.name = "android.hardware.camera*"`.
+fn eval_uses_feature(rule: &Rule, info: &ApkInfo) -> (bool, Option<String>) {
+    let needle = rule
+        .match_
+        .get("name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    if needle.is_empty() {
+        return (false, None);
+    }
+    let pat = match Pattern::new(needle) {
+        Ok(p) => p,
+        Err(_) => return (false, None),
+    };
+    for f in &info.uses_feature {
+        if pat.matches(f) {
+            return (true, Some(f.clone()));
+        }
+    }
+    (false, None)
+}
+
+/// `<uses-library>` matcher. Same shape as `eval_uses_feature`
+/// but walks `info.uses_library`. Useful for catching SDK
+/// integrations that ship as a shared library (e.g. Google Maps
+/// Android, ML Kit) without having to enumerate every class.
+fn eval_uses_library(rule: &Rule, info: &ApkInfo) -> (bool, Option<String>) {
+    let needle = rule
+        .match_
+        .get("name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    if needle.is_empty() {
+        return (false, None);
+    }
+    let pat = match Pattern::new(needle) {
+        Ok(p) => p,
+        Err(_) => return (false, None),
+    };
+    for lib in &info.uses_library {
+        if pat.matches(lib) {
+            return (true, Some(lib.clone()));
+        }
+    }
+    (false, None)
+}
+
 /// Result of evaluating a single `Rule` against an `ApkInfo`. Mirrors what
 /// the legacy rule report UI expected per-rule (matched + evidence); the
 /// newer `RuleReport` / `evaluate_components` API is per-component.
@@ -386,6 +437,8 @@ pub fn evaluate(rules: &[Rule], rule_set_id: &str, info: &ApkInfo) -> Vec<RuleRe
                 "native_library" => eval_native_library(r, info),
                 "component_class" => eval_component_class(r, info),
                 "action" => eval_action(r, info),
+                "uses_feature" => eval_uses_feature(r, info),
+                "uses_library" => eval_uses_library(r, info),
                 _ => (false, None),
             };
             RuleResult {
