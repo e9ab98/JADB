@@ -8,9 +8,7 @@ import {
   ChevronRight,
   Loader2,
   PlugZap,
-  Power,
   RefreshCw,
-  RotateCcw,
   Settings as SettingsIcon,
   Smartphone,
   Unplug,
@@ -18,22 +16,12 @@ import {
 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import {
   adbConnect,
   adbDevices,
   adbDisconnect,
-  adbReboot,
-  adbShutdown,
   type AdbDevice,
 } from '@/ipc/adb';
 import { openAppsWindow } from '@/ipc/window';
@@ -319,8 +307,6 @@ export function AdbConnectionPanel() {
 }
 
 
-type PowerAction = 'reboot' | 'recovery' | 'bootloader' | 'shutdown';
-
 function DeviceRow({
   device,
   opening,
@@ -335,36 +321,6 @@ function DeviceRow({
   const canOpen = device.state === 'device';
   const disabled = opening;
 
-  // Per-row power state. Each device row tracks its own in-flight action
-  // independently so two devices can be rebooted in parallel without
-  // either row's spinner interfering with the other.
-  const [powerBusy, setPowerBusy] = useState<string | null>(null);
-
-  async function doPower(action: PowerAction) {
-    const key = `${action}:${device.serial}`;
-    setPowerBusy(key);
-    try {
-      const verb =
-        action === 'reboot' ? 'Rebooted'
-        : action === 'recovery' ? 'Rebooted to recovery'
-        : action === 'bootloader' ? 'Rebooted to bootloader'
-        : 'Powered off';
-      if (action === 'shutdown') {
-        await adbShutdown(device.serial);
-      } else {
-        const mode =
-          action === 'recovery' ? 'recovery'
-          : action === 'bootloader' ? 'bootloader'
-          : null;
-        await adbReboot(device.serial, mode);
-      }
-      toast.success(`${verb} ${device.serial}`);
-    } catch (e) {
-      toast.error(String(e));
-    } finally {
-      setPowerBusy(null);
-    }
-  }
   return (
     <div
       role="button"
@@ -405,63 +361,6 @@ function DeviceRow({
       </div>
       <div className="flex items-center gap-2">
         <Badge variant={tone}>{device.state}</Badge>
-        {canOpen && (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                size="sm"
-                variant="ghost"
-                disabled={powerBusy !== null}
-                title={t('adb.powerMenuTooltip')}
-                onClick={(e) => e.stopPropagation()}
-              >
-                {powerBusy !== null ? (
-                  <Loader2 className="h-3 w-3 animate-spin" />
-                ) : (
-                  <Power className="h-3 w-3" />
-                )}
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
-              <DropdownMenuLabel>{device.serial}</DropdownMenuLabel>
-              <DropdownMenuSeparator />
-              {([
-                { action: 'reboot' as const, label: t('adb.powerReboot') },
-                { action: 'recovery' as const, label: t('adb.powerRecovery') },
-                { action: 'bootloader' as const, label: t('adb.powerBootloader') },
-              ]).map((it) => {
-                const busy = powerBusy === `${it.action}:${device.serial}`;
-                return (
-                  <DropdownMenuItem
-                    key={it.action}
-                    disabled={powerBusy !== null}
-                    onSelect={() => doPower(it.action)}
-                  >
-                    {busy ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <RotateCcw className="h-4 w-4" />
-                    )}
-                    {it.label}
-                  </DropdownMenuItem>
-                );
-              })}
-              <DropdownMenuSeparator />
-              <DropdownMenuItem
-                disabled={powerBusy !== null}
-                onSelect={() => doPower('shutdown')}
-                className="text-danger data-[highlighted]:text-danger"
-              >
-                {powerBusy === `shutdown:${device.serial}` ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Power className="h-4 w-4" />
-                )}
-                {t('adb.powerShutdown')}
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        )}
         {canOpen && (
           <Button
             size="sm"

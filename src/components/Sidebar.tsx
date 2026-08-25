@@ -2,7 +2,7 @@ import { NavLink } from 'react-router-dom';
 import {
   ShieldCheck,
   Settings as SettingsIcon,
-  Usb,
+  Smartphone,
   Sparkles,
   FileSearch,
   GitCompare,
@@ -21,12 +21,12 @@ import { useAppVersion } from '@/hooks/useAppVersion';
 type NavItem = {
   to: string;
   labelKey: string;
-  icon: typeof Usb;
+  icon: typeof Smartphone;
   end?: boolean;
 };
 
 const NAV_ITEMS: NavItem[] = [
-  { to: '/adb', labelKey: 'nav.adb', icon: Usb, end: false },
+  { to: '/device', labelKey: 'nav.device', icon: Smartphone, end: false },
   { to: '/apps-tools', labelKey: 'nav.apps', icon: Sparkles, end: false },
   { to: '/rules', labelKey: 'nav.rules', icon: FileSearch, end: false },
   { to: '/compare', labelKey: 'nav.compare', icon: GitCompare, end: false },

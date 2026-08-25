@@ -443,3 +443,56 @@ export async function adbLogcatPull(
     localPath,
   });
 }
+
+/**
+ * Recovery variant detected by `adb_recovery_info`. The order in
+ * the union matches the detection priority — a device that reports
+ * `ro.twrp.version` is `twrp` regardless of what else it might
+ * also report.
+ */
+export type RecoveryType = 'stock' | 'twrp' | 'orangefox' | 'lineageos' | 'aosp' | 'unknown';
+
+/**
+ * Per-device recovery diagnostics. Every field is best-effort —
+ * stock recoveries often have no `ro.product.model` (the property
+ * might be unset), custom recoveries sometimes strip
+ * `ro.build.fingerprint`, etc. The UI renders missing fields as
+ * em-dashes rather than as failures.
+ */
+export type RecoveryInfo = {
+  recoveryType: RecoveryType;
+  version: string | null;
+  model: string | null;
+  buildFingerprint: string | null;
+  /** OEM manufacturer, e.g. `Xiaomi` / `Google` / `Samsung`. The UI
+   *  combines this with `recoveryType` to render a brand-specific
+   *  label like `Xiaomi 原厂 Recovery` without inflating the
+   *  `recoveryType` enum. */
+  manufacturer: string | null;
+  /** Brand sub-classification, e.g. `Redmi` for Redmi-branded
+   *  Xiaomi devices. Often equals the manufacturer for OEMs
+   *  without sub-brands. */
+  brand: string | null;
+};
+
+/**
+ * Detect the recovery variant running on `device`. Runs a small set
+ * of `getprop` probes — each is independent, so a single failure
+ * doesn't poison the rest of the response. Stock recovery answers
+ * most probes with empty / `<unknown>` and falls through to the
+ * `stock` variant.
+ */
+export async function adbRecoveryInfo(device: string): Promise<RecoveryInfo> {
+  return invoke<RecoveryInfo>('adb_recovery_info', { device });
+}
+
+/**
+ * Run `adb sideload <path>` on `device`. Verifies the path is a real
+ * file first (the Rust side double-checks) so a stale file picker
+ * selection doesn't reach the device. Returns the raw `adb` stdout
+ * — typically `Total xfer: 1.00x` on success or a multi-line error
+ * on failure.
+ */
+export async function adbSideload(device: string, path: string): Promise<string> {
+  return invoke<string>('adb_sideload', { device, path });
+}

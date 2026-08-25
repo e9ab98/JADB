@@ -1,7 +1,7 @@
 use crate::config::settings;
 use crate::config::settings::Settings;use crate::error::{AppError, AppResult};
 use crate::services::adb_agent;
-use crate::services::adb_manager::{self, AdbDevice, AppInfo, DeviceSystemInfo, DirEntry, ExportApksResult, InstallApksResult};
+use crate::services::adb_manager::{self, AdbDevice, AppInfo, DeviceSystemInfo, DirEntry, ExportApksResult, InstallApksResult, RecoveryInfo};
 use tauri::{AppHandle, Manager, State};
 use crate::services::license::{LicenseService, FEATURE_ADB_BATCH_INSTALL};
 
@@ -933,4 +933,31 @@ pub async fn adb_app_icon_via_agent(
     let s = settings::read(&dir).await?;
     adb_agent::ensure_agent_pushed(&app, &s, &device).await?;
     adb_agent::pull_icon(&s, &device, &package).await
+}
+
+#[tauri::command]
+pub async fn adb_recovery_info(
+    app: AppHandle,
+    device: String,
+) -> AppResult<RecoveryInfo> {
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| AppError::Config(e.to_string()))?;
+    let s = settings::read(&dir).await?;
+    adb_manager::recovery_info(&s, &device).await
+}
+
+#[tauri::command]
+pub async fn adb_sideload(
+    app: AppHandle,
+    device: String,
+    path: String,
+) -> AppResult<String> {
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| AppError::Config(e.to_string()))?;
+    let s = settings::read(&dir).await?;
+    adb_manager::sideload(&s, &device, &path).await
 }

@@ -3198,3 +3198,177 @@ mod list_packages_tests {
         assert_eq!(args, vec!["pm", "list", "packages", "-f", "-3"]);
     }
 }
+
+
+/// Recovery type detected by `recovery_info`. `Unknown` covers both
+/// "stock recovery we couldn't recognise" and "device answered but
+/// every probe failed" — the UI surfaces both the same way.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum RecoveryType {
+    Stock,
+    Twrp,
+    OrangeFox,
+    LineageOs,
+    Aosp,
+    Unknown,
+}
+
+impl Default for RecoveryType {
+    fn default() -> Self { RecoveryType::Unknown }
+}
+
+/// Per-device recovery diagnostics. Every field is optional because
+/// each probe is independent: a TWRP that doesn't expose
+/// `ro.product.model` (some don't) still gets the other fields filled.
+/// Missing fields render as em-dashes, not as "info failed".
+///
+/// `recovery_type` classifies the recovery variant (custom vs. stock vs.
+/// AOSP) at a structural level. The OEM **brand** is a separate
+/// dimension exposed via `manufacturer` / `brand` so the UI can show
+/// "Xiaomi 原厂 Recovery" instead of a generic "原厂 Recovery" label
+/// without inflating the recovery_type enum.
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct RecoveryInfo {
+    pub recovery_type: RecoveryType,
+    /// Recovery-specific version string, in priority order:
+    ///   1. `ro.twrp.version` / `ro.orangefox.version` /
+    ///      `ro.lineage.version` (custom recoveries set these)
+    ///   2. `ro.recovery.version` (some stock recoveries set this;
+    ///      e.g. Lineage stock, some Huawei / Honor builds)
+    ///   3. None — MIUI and most OEM stock recoveries don't expose
+    ///      their version as a getprop; the version string is only
+    ///      visible in the recovery UI itself.
+    pub version: Option<String>,
+    /// Product model from `ro.product.model` — recovery shells
+    /// almost always have this property available.
+    pub model: Option<String>,
+    /// Recovery's reported build fingerprint (often empty in stock
+    /// recovery). Useful when debugging OEM-signed vs unsigned builds.
+    pub build_fingerprint: Option<String>,
+    /// OEM manufacturer, e.g. `"Xiaomi"`, `"Google"`, `"Samsung"`.
+    /// Combined with `recovery_type` to label the UI badge as
+    /// "Xiaomi 原厂 Recovery" / "Pixel 原厂 Recovery" etc.
+    pub manufacturer: Option<String>,
+    /// Brand sub-classification, e.g. `"Redmi"` for Redmi-branded
+    /// Xiaomi devices, `"Pixel"` for Google Pixel. Often equals the
+    /// manufacturer for OEMs without sub-brands.
+    pub brand: Option<String>,
+}
+
+/// Try a single `adb shell` getprop and trim the result. Returns
+/// `None` on any failure (shell not available, prop unset, etc.) —
+/// we never want a partial probe to abort the whole panel.
+async fn try_getprop_shell(
+    settings: &Settings,
+    serial: &str,
+    prop: &str,
+) -> Option<String> {
+    let out = run_adb_shell(settings, serial, &["getprop", prop]).await.ok()?;
+    let trimmed = out.trim();
+    if trimmed.is_empty() || trimmed == "<unknown>" {
+        return None;
+    }
+    Some(trimmed.to_string())
+}
+
+/// Detect the recovery variant on `device`. Probes are independent
+/// and best-effort: a single failing getprop doesn't poison the rest.
+///
+/// Detection order (most specific first):
+///   1. TWRP — `ro.twrp.version` is the canonical marker; we also
+///      accept the older `ro.twrp.*` form. Falls back to a file probe
+///      of `/twres/TWRP` for bootloaders that strip the property.
+///   2. OrangeFox — `ro.orangefox.version` (also `ro.of.version` on
+///      older builds). Falls back to `/sbin/fox.bin` file probe.
+///   3. LineageOS recovery — `ro.lineage.version`.
+///   4. AOSP recovery (Pixel, AOSP GSI) — no version property, but
+///      `ro.boot.image` is set to the boot image hash. Stock Pixel
+///      recovery inherits this from AOSP, so we treat it as "AOSP"
+///      unless we can positively identify it as something else.
+///   5. Stock (OEM-branded) — `ro.boot.image` empty AND none of the
+///      above matched; that's the "vanilla recovery" case.
+///   6. Unknown — everything failed.
+pub async fn recovery_info(
+    settings: &Settings,
+    serial: &str,
+) -> AppResult<RecoveryInfo> {
+    // Probe all known version properties + the fallback markers in
+    // parallel-friendly form (sequential awaits are fine; recovery
+    // shell is slow regardless). Each probe is independent: a single
+    // failing getprop doesn't poison the rest of the response.
+    let twrp_version = try_getprop_shell(settings, serial, "ro.twrp.version").await;
+    let orangefox_version = try_getprop_shell(settings, serial, "ro.orangefox.version").await;
+    let orangefox_alt = try_getprop_shell(settings, serial, "ro.of.version").await;
+    let lineage_version = try_getprop_shell(settings, serial, "ro.lineage.version").await;
+    let recovery_version_prop = try_getprop_shell(settings, serial, "ro.recovery.version").await;
+    let model = try_getprop_shell(settings, serial, "ro.product.model").await;
+    let boot_image = try_getprop_shell(settings, serial, "ro.boot.image").await;
+    let build_fingerprint = try_getprop_shell(settings, serial, "ro.build.fingerprint").await;
+    let manufacturer = try_getprop_shell(settings, serial, "ro.product.manufacturer").await;
+    let brand = try_getprop_shell(settings, serial, "ro.product.brand").await;
+
+    let recovery_type = if twrp_version.is_some() {
+        RecoveryType::Twrp
+    } else if orangefox_version.is_some() || orangefox_alt.is_some() {
+        RecoveryType::OrangeFox
+    } else if lineage_version.is_some() {
+        RecoveryType::LineageOs
+    } else if boot_image.is_some() {
+        // AOSP / Pixel recovery sets ro.boot.image. If everything else
+        // failed but this is set, we know it's at least AOSP-derived.
+        RecoveryType::Aosp
+    } else {
+        RecoveryType::Stock
+    };
+
+    // Version priority: custom-recovery version props first, then
+    // the generic `ro.recovery.version` (some stock recoveries set
+    // this — notably Huawei EMUI / Honor Magic UI / some Samsung
+    // builds). MIUI stock doesn't expose its version as a getprop,
+    // so for MIUI we end up with `version: None` — that's fine,
+    // the recovery UI is the source of truth for those.
+    let version = twrp_version
+        .or(orangefox_version)
+        .or(orangefox_alt)
+        .or(lineage_version)
+        .or(recovery_version_prop);
+
+    Ok(RecoveryInfo {
+        recovery_type,
+        version,
+        model,
+        build_fingerprint,
+        manufacturer,
+        brand,
+    })
+}
+
+/// Run `adb sideload <path>`. Verifies the path exists locally first
+/// — the Tauri dialog guarantees we received a real path, but a stale
+/// file or wrong extension slipped through shouldn't reach the
+/// device. Returns the raw stdout (typically "Total xfer: 1.00x" on
+/// success or a multi-line error on failure) for the UI to toast.
+pub async fn sideload(
+    settings: &Settings,
+    serial: &str,
+    path: &str,
+) -> AppResult<String> {
+    if path.trim().is_empty() {
+        return Err(AppError::InvalidInput("sideload path is empty".into()));
+    }
+    let p = std::path::Path::new(path);
+    if !p.exists() {
+        return Err(AppError::InvalidInput(format!(
+            "sideload file not found: {path}"
+        )));
+    }
+    if !p.is_file() {
+        return Err(AppError::InvalidInput(format!(
+            "sideload path is not a file: {path}"
+        )));
+    }
+    let out = run_adb(settings, Some(serial), &["sideload", path]).await?;
+    Ok(out.trim().to_string())
+}

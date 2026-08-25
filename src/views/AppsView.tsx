@@ -2,12 +2,22 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import '@/i18n';
-import { Loader2, PackagePlus, Smartphone, Terminal } from 'lucide-react';
+import { Loader2, PackagePlus, Power, RotateCcw, Smartphone, Terminal } from 'lucide-react';
 import { open } from '@tauri-apps/plugin-dialog';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import {
   adbInstallApks,
+  adbReboot,
+  adbShutdown,
   type DeviceSystemInfo,
 } from '@/ipc/adb';
 import { usePackagesStore } from '@/store/packages';
@@ -90,6 +100,37 @@ export function AppsView() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [serial]);
 
+  // Power actions state lives at the top of the view because there is only
+  // one device per window — no need to namespace by serial like the
+  // multi-row AdbConnectionPanel does.
+  const [powerBusy, setPowerBusy] = useState<PowerAction | null>(null);
+
+  async function doPower(action: PowerAction) {
+    if (!serial || powerBusy) return;
+    setPowerBusy(action);
+    try {
+      const verb =
+        action === 'reboot' ? 'Rebooted'
+        : action === 'recovery' ? 'Rebooted to recovery'
+        : action === 'bootloader' ? 'Rebooted to bootloader'
+        : 'Powered off';
+      if (action === 'shutdown') {
+        await adbShutdown(serial);
+      } else {
+        const mode =
+          action === 'recovery' ? 'recovery'
+          : action === 'bootloader' ? 'bootloader'
+          : null;
+        await adbReboot(serial, mode);
+      }
+      toast.success(`${verb} ${serial}`);
+    } catch (e) {
+      toast.error(String(e));
+    } finally {
+      setPowerBusy(null);
+    }
+  }
+
   async function installApks() {
     if (!serial || installing) return;
     const picked = await open({ multiple: true, filters: [{ name: 'APK', extensions: ['apk'] }] });
@@ -137,10 +178,17 @@ export function AppsView() {
             {serial}
           </span>
         </div>
-        <Button onClick={() => void installApks()} disabled={installing}>
-          {installing ? <Loader2 className="h-4 w-4 animate-spin" /> : <PackagePlus className="h-4 w-4" />}
-          {installing ? t('adb.installing') : t('adb.installApk')}
-        </Button>
+        <div className="flex items-center gap-2">
+          <DevicePowerMenu
+            serial={serial}
+            powerBusy={powerBusy}
+            onPower={doPower}
+          />
+          <Button onClick={() => void installApks()} disabled={installing}>
+            {installing ? <Loader2 className="h-4 w-4 animate-spin" /> : <PackagePlus className="h-4 w-4" />}
+            {installing ? t('adb.installing') : t('adb.installApk')}
+          </Button>
+        </div>
       </header>
 
       <main className="flex-1 overflow-auto p-6">
@@ -180,5 +228,77 @@ export function AppsView() {
         </Tabs>
       </main>
     </div>
+  );
+}
+
+
+type PowerAction = 'reboot' | 'recovery' | 'bootloader' | 'shutdown';
+
+function DevicePowerMenu({
+  serial,
+  powerBusy,
+  onPower,
+}: {
+  serial: string;
+  powerBusy: PowerAction | null;
+  onPower: (action: PowerAction) => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          size="icon"
+          variant="outline"
+          disabled={powerBusy !== null}
+          title={t('adb.powerMenuTooltip')}
+          aria-label={t('adb.powerMenuTooltip')}
+        >
+          {powerBusy !== null ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <Power className="h-4 w-4" />
+          )}
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        <DropdownMenuLabel>{serial}</DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        {([
+          { action: 'reboot' as const, label: t('adb.powerReboot') },
+          { action: 'recovery' as const, label: t('adb.powerRecovery') },
+          { action: 'bootloader' as const, label: t('adb.powerBootloader') },
+        ]).map((it) => {
+          const busy = powerBusy === it.action;
+          return (
+            <DropdownMenuItem
+              key={it.action}
+              disabled={powerBusy !== null}
+              onSelect={() => onPower(it.action)}
+            >
+              {busy ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <RotateCcw className="h-4 w-4" />
+              )}
+              {it.label}
+            </DropdownMenuItem>
+          );
+        })}
+        <DropdownMenuSeparator />
+        <DropdownMenuItem
+          disabled={powerBusy !== null}
+          onSelect={() => onPower('shutdown')}
+          className="text-danger data-[highlighted]:text-danger"
+        >
+          {powerBusy === 'shutdown' ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <Power className="h-4 w-4" />
+          )}
+          {t('adb.powerShutdown')}
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }

@@ -29,6 +29,7 @@
     "active": true,
     "targets": [
       "dmg",
+      "app",
       "msi"
     ],
     "icon": [

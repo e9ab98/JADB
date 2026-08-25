@@ -15,3 +15,4 @@ pub mod window;
 pub mod report;
 
 pub mod license;
+pub mod fastboot;

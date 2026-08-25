@@ -19,3 +19,4 @@ pub mod java_runtime;
 pub mod logcat_manager;
 
 pub mod license;
+pub mod fastboot_manager;

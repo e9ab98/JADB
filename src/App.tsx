@@ -7,7 +7,7 @@ import { AppsToolsView } from '@/views/AppsToolsView';
 import { DecompileView } from '@/views/DecompileView';
 import { RepackageView } from '@/views/RepackageView';
 import { SignView } from '@/views/SignView';
-import { AdbView } from '@/views/AdbView';
+import { DeviceView } from '@/views/DeviceView';
 import { AppsView } from '@/views/AppsView';
 import { DataDirView } from '@/views/DataDirView';
 import { RulesView } from '@/views/RulesView';
@@ -48,7 +48,7 @@ function Shell() {
       {!isStandaloneWindow && <Sidebar />}
       <main className="flex-1 overflow-auto">
         <Routes>
-          <Route path="/" element={<Navigate to="/adb" replace />} />
+          <Route path="/" element={<Navigate to="/device" replace />} />
           <Route path="/analyze" element={<AnalyzeView />} />
           <Route path="/decompile" element={<DecompileView />} />
           <Route path="/repackage" element={<RepackageView />} />
@@ -57,7 +57,8 @@ function Shell() {
             path="/signatures"
             element={<Navigate to="/settings?tab=signatures" replace />}
           />
-          <Route path="/adb" element={<AdbView />} />
+          <Route path="/device" element={<DeviceView />} />
+          <Route path="/adb" element={<Navigate to="/device?tab=adb" replace />} />
           <Route path="/apps-tools" element={<AppsToolsView />} />
           <Route path="/apps" element={<AppsView />} />
           <Route path="/data-dir" element={<DataDirView />} />
