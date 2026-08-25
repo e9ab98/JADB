@@ -24,20 +24,24 @@ jobs:
           - os: macos-14
             target: aarch64-apple-darwin
             label: darwin-arm64
+            zealot_channel: "<jadb_mac_arm64_channel_key>"   # 替换成 Zealot 上对应 channel 的 32-char key
             bundler_args: "--bundles dmg,app"
           - os: macos-15-intel
             target: x86_64-apple-darwin
             label: darwin-x64
+            zealot_channel: "<jadb_mac_x64_channel_key>"   # 替换成 Zealot 上对应 channel 的 32-char key
             bundler_args: "--bundles dmg,app"
           - os: windows-2022
             target: x86_64-pc-windows-msvc
             label: windows-x64
+            zealot_channel: "<jadb_win_x64_channel_key>"   # 替换成 Zealot 上对应 channel 的 32-char key
             bundler_args: "--bundles msi"
           # Windows ARM64 (Surface Pro X, Snapdragon X laptops). GitHub
           # added windows-11-arm as a GA label in 2024.
           - os: windows-11-arm
             target: aarch64-pc-windows-msvc
             label: windows-arm64
+            zealot_channel: "<jadb_win_arm64_channel_key>"   # 替换成 Zealot 上对应 channel 的 32-char key
             bundler_args: "--bundles msi"
     runs-on: ${{ matrix.os }}
 
@@ -164,6 +168,117 @@ jobs:
           releaseDraft: false
           prerelease: false
           args: --target ${{ matrix.target }} ${{ matrix.bundler_args }}
+
+      # Mirror the bundles to Zealot (https://e9ab98.jzy.cc) so the Tauri
+      # updater relay can serve latest.json. Unlike NiceSSH, this step
+      # uploads BOTH the .dmg (for human download) AND the .app.tar.gz
+      # (what Tauri's macOS updater actually downloads). Without the
+      # .app.tar.gz upload, Mac users would see "no update available"
+      # or the auto-update would fail with a 404 on the bundle URL.
+      #
+      # Each .sig file (from tauri-action's signing step) is embedded
+      # into Zealot's custom_fields jsonb under `tauri_signature`; the
+      # relay reads it back and assembles the Tauri manifest signature
+      # field. The relay also stores the bundle filename under
+      # `tauri_filename` for future debugging.
+      #
+      # Requires the Zealot channel to have bundle_id set to "*" (or empty)
+      # so the bundle_id_matched validation passes for unparsed .dmg/.msi
+      # files. AppInfo (Zealot's parser) cannot read Tauri bundles, so each
+      # upload will have empty metadata on the Zealot side.
+      - name: Upload to Zealot
+        if: success() && matrix.zealot_channel != ''
+        shell: bash
+        env:
+          ZEALOT_HOST: ${{ secrets.ZEALOT_HOST }}
+          ZEALOT_TOKEN: ${{ secrets.ZEALOT_TOKEN }}
+        run: |
+          set -u
+
+          if [ -z "$ZEALOT_HOST" ] || [ -z "$ZEALOT_TOKEN" ]; then
+            echo "::warning::ZEALOT_HOST / ZEALOT_TOKEN not set, skipping Zealot upload"
+            exit 0
+          fi
+
+          # Pick which bundle files to upload per target. We use an array
+          # rather than a single `ext` because macOS produces TWO installable
+          # artifacts: the .dmg (GUI installer) and the .app.tar.gz (what
+          # Tauri's updater downloads). Windows produces one .msi.
+          shopt -s nullglob
+          files=()
+          case "${{ matrix.target }}" in
+            *-apple-darwin)
+              files=(
+                src-tauri/target/${{ matrix.target }}/release/bundle/macos/*.dmg
+                src-tauri/target/${{ matrix.target }}/release/bundle/macos/*.app.tar.gz
+              )
+              ;;
+            *-windows-msvc)
+              files=(
+                src-tauri/target/${{ matrix.target }}/release/bundle/msi/*.msi
+              )
+              ;;
+            *)
+              echo "::warning::No Zealot upload rule for target ${{ matrix.target }}"
+              exit 0
+              ;;
+          esac
+
+          # Read the changelog body from release-notes.md (written by the
+          # Generate release notes step). Reading via cat (not via
+          # ${{ steps.x.outputs.body }} substitution) avoids bash parsing
+          # the multi-line content: even inside double quotes, bash still
+          # treats backticks as command substitution, which breaks because
+          # the changelog contains markdown like `[`8577df8`](url)` whose
+          # backticks would try to execute "8577df8" as a command.
+          CHLOG_FILE=$(mktemp)
+          trap 'rm -f "$CHLOG_FILE"' EXIT
+          cat "$GITHUB_WORKSPACE/release-notes.md" > "$CHLOG_FILE"
+
+          uploaded=0
+          failed=0
+          for f in "${files[@]}"; do
+            echo "Uploading $f -> channel ${{ matrix.zealot_channel }}"
+
+            sig_file="${f}.sig"
+
+            # Build curl args as a single non-empty array. Always has at
+            # least file + channel_key, so we never hit bash 3.2's
+            # `set -u` + empty-array footgun.
+            CURL_ARGS=(
+              -fsSL -X POST "$ZEALOT_HOST/api/apps/upload?token=$ZEALOT_TOKEN"
+              -F "file=@${f}"
+              -F "channel_key=${{ matrix.zealot_channel }}"
+            )
+
+            if [ -f "$sig_file" ]; then
+              sig_json=$(SIGNATURE_PATH="$sig_file" BUNDLE_PATH="$f" python3 -c "import json, os, sys; sig=open(os.environ['SIGNATURE_PATH']).read(); print(json.dumps({'tauri_signature': sig, 'tauri_filename': os.path.basename(os.environ['BUNDLE_PATH'])}))")
+              CURL_ARGS+=(-F "custom_fields=${sig_json}")
+              echo "  + embedded signature ($(wc -c < "$sig_file") bytes) for $(basename "$f")"
+            else
+              echo "::warning::No .sig file at $sig_file; relay will return empty signature"
+            fi
+
+            CURL_ARGS+=(
+              -F "source=github-actions"
+              -F "branch=${{ github.ref_name }}"
+              -F "git_commit=${{ github.sha }}"
+              -F "ci_url=https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+              -F "changelog=<${CHLOG_FILE}"
+            )
+
+            if curl "${CURL_ARGS[@]}"; then
+              uploaded=$((uploaded + 1))
+            else
+              failed=$((failed + 1))
+              echo "::warning::Zealot upload failed for $f"
+            fi
+          done
+
+          echo "Upload summary: uploaded=$uploaded, failed=$failed"
+          if [ "$uploaded" -eq 0 ] && [ "${#files[@]}" -gt 0 ]; then
+            echo "::warning::No bundle files were uploaded (build may have failed to produce artifacts)"
+          fi
 
   post-rename:
     name: Normalize aarch64 \xe2\x86\x92 arm64 in release assets

@@ -47,7 +47,7 @@
   "plugins": {
     "updater": {
       "endpoints": [
-        "https://github.com/e9ab98/JADB/releases/latest/download/latest.json"
+        "https://e9ab98.jzy.cc/relay/jadb/latest.json"
       ],
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDkyQUYyQUIyN0I4MUI5NjEKUldSaHVZRjdzaXF2a25Cb0I1MHNqL3RRdlkxbGErQ1pkVlNQV1dhbndTU2pGWEN5enk3U3dtdDkK",
       "windows": {
