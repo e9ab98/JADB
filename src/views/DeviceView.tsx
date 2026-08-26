@@ -5,14 +5,15 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { AdbConnectionPanel } from '@/features/adb/AdbConnectionPanel';
 import { FastbootPanel } from '@/features/fastboot/FastbootPanel';
 import { RecoveryPanel } from '@/features/recovery/RecoveryPanel';
+import { ToolsPanel } from '@/features/tools/ToolsPanel';
 
 /** Whitelisted tab ids accepted by `?tab=`. Anything else falls back
  *  to `adb` so the URL never strands the user on a missing tab. */
-type DeviceTab = 'adb' | 'recovery' | 'fastboot';
+type DeviceTab = 'adb' | 'recovery' | 'fastboot' | 'tools';
 const DEFAULT_TAB: DeviceTab = 'adb';
 
 function isDeviceTab(value: string | null): value is DeviceTab {
-  return value === 'adb' || value === 'recovery' || value === 'fastboot';
+  return value === 'adb' || value === 'recovery' || value === 'fastboot' || value === 'tools';
 }
 
 /**
@@ -44,6 +45,7 @@ export function DeviceView() {
           <TabsTrigger value="adb">{t('recovery.deviceTab')}</TabsTrigger>
           <TabsTrigger value="recovery">{t('recovery.recoveryTab')}</TabsTrigger>
           <TabsTrigger value="fastboot">{t('recovery.fastbootTab')}</TabsTrigger>
+          <TabsTrigger value="tools">{t('tools.tab')}</TabsTrigger>
         </TabsList>
         <TabsContent value="adb">
           <AdbConnectionPanel />
@@ -53,6 +55,9 @@ export function DeviceView() {
         </TabsContent>
         <TabsContent value="fastboot">
           <FastbootPanel />
+        </TabsContent>
+        <TabsContent value="tools">
+          <ToolsPanel />
         </TabsContent>
       </Tabs>
     </div>

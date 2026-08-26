@@ -66,6 +66,8 @@ pub fn run() {
             commands::adb::adb_devices,
             commands::adb::adb_connect,
             commands::adb::adb_disconnect,
+            commands::adb::adb_tcpip,
+            commands::adb::adb_reconnect,
             commands::adb::adb_list_packages,
             commands::adb::adb_list_packages_via_agent,
             commands::adb::adb_app_icon_via_agent,

@@ -961,3 +961,66 @@ pub async fn adb_sideload(
     let s = settings::read(&dir).await?;
     adb_manager::sideload(&s, &device, &path).await
 }
+
+
+// ---------------------------------------------------------------------------
+// `adb tcpip <port>` -- ask the on-device adbd to start listening on a TCP
+// port so the user can drop the USB cable and `adb connect <ip>:<port>`
+// from their workstation.
+// ---------------------------------------------------------------------------
+//
+// Pre-Android-11 wireless debugging went through this command exclusively:
+// enabling developer options, then `adb tcpip 5555`, then look at
+// `Settings -> About -> Status` for the device IP, then `adb connect`.
+// Android 11 replaced it with the QR / pairing-code flow (`adb pair`),
+// but `adb tcpip` still works on every Android version (including
+// 13/14/15) and is the lowest-friction path when both devices are
+// already on the same Wi-Fi.
+//
+// We pass `-s <serial>` so the command targets the device the user
+// picked in the Tools dropdown instead of erroring out with
+// "more than one device/emulator" on multi-device hosts.
+
+#[tauri::command]
+pub async fn adb_tcpip(
+    app: AppHandle,
+    device: String,
+    port: u16,
+) -> AppResult<String> {
+    if port == 0 {
+        return Err(AppError::InvalidInput("port must be > 0".into()));
+    }
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| AppError::Config(e.to_string()))?;
+    let s = settings::read(&dir).await?;
+    let port_str = port.to_string();
+    let out = adb_manager::run_adb(&s, Some(&device), &["tcpip", &port_str]).await?;
+    Ok(out.trim().to_string())
+}
+
+// ---------------------------------------------------------------------------
+// `adb reconnect [serial]` -- drop and re-establish the adb connection to a
+// serial that's stuck in `offline` / `unauthorized` state. Useful right
+// after toggling `tcpip` or after the user re-grants USB-debugging auth.
+// ---------------------------------------------------------------------------
+//
+// `adb reconnect` (no serial) reconnects every device; with a serial it
+// scopes to that one. We always pass the serial explicitly -- the Tools
+// panel knows which device the user is acting on and reconnecting a
+// different device would surprise them.
+
+#[tauri::command]
+pub async fn adb_reconnect(
+    app: AppHandle,
+    device: String,
+) -> AppResult<String> {
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| AppError::Config(e.to_string()))?;
+    let s = settings::read(&dir).await?;
+    let out = adb_manager::run_adb(&s, Some(&device), &["reconnect"]).await?;
+    Ok(out.trim().to_string())
+}

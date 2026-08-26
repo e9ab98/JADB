@@ -496,3 +496,27 @@ export async function adbRecoveryInfo(device: string): Promise<RecoveryInfo> {
 export async function adbSideload(device: string, path: string): Promise<string> {
   return invoke<string>('adb_sideload', { device, path });
 }
+
+/**
+ * Run `adb -s <serial> tcpip <port>` -- ask the on-device adbd to
+ * listen on `<port>` so the workstation can `adb connect <ip>:<port>`
+ * without USB. Pre-Android-11 wireless-debugging entry point; still
+ * works on Android 11+ and is the path of least resistance when both
+ * devices are on the same Wi-Fi.
+ *
+ * Returns trimmed `adb` stdout (typically `restarting in TCP mode
+ * port: 5555`). Caller surfaces the IP separately.
+ */
+export async function adbTcpip(device: string, port: number): Promise<string> {
+  return invoke<string>('adb_tcpip', { device, port });
+}
+
+/**
+ * Run `adb -s <serial> reconnect` -- drop and re-establish the
+ * connection to a device stuck in `offline` / `unauthorized`.
+ * Useful right after `tcpip` toggling or after the user re-grants
+ * USB-debugging auth on the device.
+ */
+export async function adbReconnect(device: string): Promise<string> {
+  return invoke<string>('adb_reconnect', { device });
+}

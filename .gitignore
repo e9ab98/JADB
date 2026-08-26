@@ -25,7 +25,7 @@ docs/
 # Daily review output is tracked (intentional whitelist)
 !docs/superpowers/daily/
 !docs/superpowers/daily/**
-tools/
+/tools/
 # OS noise
 .DS_Store
 Thumbs.db
