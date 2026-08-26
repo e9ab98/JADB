@@ -1,6 +1,6 @@
 [package]
 name = "jadb"
-version = "0.1.39"
+version = "0.1.41"
 description = "Cross-platform APK analysis desktop GUI"
 authors = ["JADB Contributors"]
 license = "MIT"
