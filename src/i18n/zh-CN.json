@@ -955,19 +955,22 @@
     },
     "screenshot": {
       "title": "一键截图",
-      "subtitle": "在设备上执行 screencap 并保存到本地，立即预览。",
+      "subtitle": "截取设备屏幕，预览后决定保存到本地或放弃。",
       "run": "截图",
       "running": "截取中…",
       "success": "截图已保存",
       "saveTitle": "保存截图",
+      "save": "保存到本地",
+      "discard": "放弃",
+      "previewTitle": "截图预览",
+      "previewDescription": "确认截图内容后，选择保存到本地或放弃本次截图。",
       "preview": "预览",
       "captured": "已截取设备屏幕",
       "saveCancelled": "已取消保存",
       "missingLocalPath": "缺少本地路径",
       "steps": {
         "capture": "执行 screencap",
-        "pickTarget": "选择保存位置",
-        "pull": "拉取到本地"
+        "pullToCache": "拉取到临时目录"
       }
     },
     "devOptions": {
@@ -1069,6 +1072,20 @@
       "noIpFoundNoTcpip": "没有找到任何可用 IP（未执行 tcpip）。请检查 WiFi 是否已连接。",
       "tcpipFailedButIpKnown": "tcpip 失败，但已发现 IP。设备可能已经在监听上一个端口：{{error}}",
       "partialWarning": "部分成功"
+    },
+    "section": {
+      "connection": {
+        "title": "连接",
+        "subtitle": "无线 ADB 切换与配对"
+      },
+      "device": {
+        "title": "设备操作",
+        "subtitle": "一次性动作：MIUI USB 安装、截图、BugReport、开发者选项"
+      },
+      "app": {
+        "title": "应用管理",
+        "subtitle": "批量冻结 / 解冻设备上的应用"
+      }
     }
   },
   "update": {

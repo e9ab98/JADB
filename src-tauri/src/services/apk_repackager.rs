@@ -60,9 +60,22 @@ pub async fn repackage(
     let runtime = java_runtime::resolve(&settings_clone, Some(&dir))?;
 
     tokio::spawn(async move {
-        let mut cmd = Command::new(&apktool_clone);
-        cmd.args(build_apktool_b_args(&src, &out))
-            .stdout(Stdio::piped())
+        let args = build_apktool_b_args(&src, &out);
+        // Bundled apktool is a .jar without +x; launching it directly
+        // returns EACCES. Route through `java -jar` (resolved above
+        // for the signer) instead. If `apktool_path` points at a
+        // wrapper script instead, fall back to direct exec so custom
+        // setups keep working.
+        let mut cmd = if apktool_clone.to_ascii_lowercase().ends_with(".jar") {
+            let mut c = Command::new(&runtime.java_bin);
+            c.arg("-jar").arg(&apktool_clone).args(&args);
+            c
+        } else {
+            let mut c = Command::new(&apktool_clone);
+            c.args(&args);
+            c
+        };
+        cmd.stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(true);
         progress::emit_progress(&app_clone, &task_id_clone, 0.0, "重打包中");

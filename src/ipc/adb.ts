@@ -264,6 +264,18 @@ export async function pullFile(
   });
 }
 
+export async function screenshotPullToCache(device: string): Promise<string> {
+  return invoke<string>('screenshot_pull_to_cache', { device });
+}
+
+export async function screenshotSaveFromCache(localPath: string): Promise<string> {
+  return invoke<string>('screenshot_save_from_cache', { localPath });
+}
+
+export async function screenshotDiscardCache(): Promise<void> {
+  return invoke<void>('screenshot_discard_cache');
+}
+
 export async function pushFile(
   device: string,
   localPath: string,

@@ -1,10 +1,12 @@
 use crate::config::settings::Settings;
 use crate::error::{AppError, AppResult};
 use crate::progress;
+use crate::services::java_runtime;
 use crate::services::task_registry::TaskRegistry;
 use serde::Serialize;
 use std::process::Stdio;
 use tauri::AppHandle;
+use tauri::Manager;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 
@@ -50,6 +52,18 @@ pub async fn decompile(
     let task_id = uuid::Uuid::new_v4().to_string();
     let token = registry.register(&task_id);
 
+    // apktool ships only as a JAR (see tool_manager::resolve_binary_path),
+    // so spawning it requires `java -jar`. We resolve the runtime here
+    // (bundled Temurin JDK -> system java on PATH) so the spawn below
+    // can use it instead of failing with EACCES on a non-executable
+    // .jar (errno 13 / "Permission denied").
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| AppError::Config(e.to_string()))?;
+    let runtime = java_runtime::resolve(settings, Some(&dir))?;
+    let java_bin = runtime.java_bin.clone();
+
     let apk = apk_path.to_string();
     let out = out_dir.to_string();
     let app_clone = app.clone();
@@ -58,9 +72,20 @@ pub async fn decompile(
 
     tokio::spawn(async move {
         let args = build_apktool_args(&apk, &out, force);
-        let mut cmd = Command::new(&apktool);
-        cmd.args(&args)
-            .stdout(Stdio::piped())
+        // Bundled apktool is a .jar without +x; launching it directly
+        // returns EACCES. Route through `java -jar` instead. If a user
+        // has pointed `apktool_path` at a wrapper script (non-.jar),
+        // fall back to direct exec so custom setups keep working.
+        let mut cmd = if apktool.to_ascii_lowercase().ends_with(".jar") {
+            let mut c = Command::new(&java_bin);
+            c.arg("-jar").arg(&apktool).args(&args);
+            c
+        } else {
+            let mut c = Command::new(&apktool);
+            c.args(&args);
+            c
+        };
+        cmd.stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(true);
 

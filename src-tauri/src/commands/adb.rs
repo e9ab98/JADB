@@ -4,6 +4,7 @@ use crate::services::adb_agent;
 use crate::services::adb_manager::{self, AdbDevice, AppInfo, DeviceSystemInfo, DirEntry, ExportApksResult, InstallApksResult, RecoveryInfo};
 use tauri::{AppHandle, Manager, State};
 use crate::services::license::{LicenseService, FEATURE_ADB_BATCH_INSTALL};
+use std::path::PathBuf;
 
 #[tauri::command]
 pub async fn adb_devices(app: AppHandle) -> AppResult<Vec<AdbDevice>> {
@@ -281,6 +282,84 @@ pub async fn pull_file(
         use_root,
     )
     .await
+}
+
+const SCREENSHOT_CACHE_FILE: &str = "jadb-screenshot-preview.png";
+
+fn screenshot_cache_path(app: &AppHandle) -> AppResult<PathBuf> {
+    let cache_dir = app
+        .path()
+        .app_cache_dir()
+        .map_err(|e| AppError::Config(e.to_string()))?;
+    Ok(cache_dir.join(SCREENSHOT_CACHE_FILE))
+}
+
+/// Pull the device screenshot into the application cache without exposing the
+/// cache directory to the frontend. The returned path is only used by the
+/// local image renderer until the user chooses a final destination.
+#[tauri::command]
+pub async fn screenshot_pull_to_cache(app: AppHandle, device: String) -> AppResult<String> {
+    let cache_path = screenshot_cache_path(&app)?;
+    if let Some(parent) = cache_path.parent() {
+        tokio::fs::create_dir_all(parent).await?;
+    }
+    if cache_path.exists() {
+        tokio::fs::remove_file(&cache_path).await?;
+    }
+
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| AppError::Config(e.to_string()))?;
+    let s = settings::read(&dir).await?;
+    adb_manager::pull_file(
+        &s,
+        &device,
+        "/sdcard/jadb-screenshot.png",
+        &cache_path,
+    )
+    .await?;
+
+    Ok(cache_path.to_string_lossy().into_owned())
+}
+
+/// Copy the staged screenshot to the user's selected destination and remove
+/// the application cache copy afterwards.
+#[tauri::command]
+pub async fn screenshot_save_from_cache(
+    app: AppHandle,
+    local_path: String,
+) -> AppResult<String> {
+    let cache_path = screenshot_cache_path(&app)?;
+    if !cache_path.is_file() {
+        return Err(AppError::NotFound("staged screenshot cache".into()));
+    }
+
+    let target = PathBuf::from(local_path.trim());
+    if target.as_os_str().is_empty() {
+        return Err(AppError::InvalidInput("destination path is empty".into()));
+    }
+    if target == cache_path {
+        return Err(AppError::InvalidInput(
+            "destination must be different from the application cache".into(),
+        ));
+    }
+    if let Some(parent) = target.parent() {
+        tokio::fs::create_dir_all(parent).await?;
+    }
+    tokio::fs::copy(&cache_path, &target).await?;
+    tokio::fs::remove_file(&cache_path).await?;
+    Ok(target.to_string_lossy().into_owned())
+}
+
+/// Delete the staged screenshot when the user chooses to discard it.
+#[tauri::command]
+pub async fn screenshot_discard_cache(app: AppHandle) -> AppResult<()> {
+    let cache_path = screenshot_cache_path(&app)?;
+    if cache_path.is_file() {
+        tokio::fs::remove_file(&cache_path).await?;
+    }
+    Ok(())
 }
 
 #[tauri::command]

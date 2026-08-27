@@ -1,13 +1,13 @@
-import { useRef, useState } from 'react';
+import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import '@/i18n';
+import { convertFileSrc } from '@tauri-apps/api/core';
 import {
   AlertTriangle,
   Camera,
   Check,
   ChevronDown,
   ChevronUp,
-  Image as ImageIcon,
   Loader2,
   Play,
   RotateCcw,
@@ -16,44 +16,46 @@ import { save as saveDialog } from '@tauri-apps/plugin-dialog';
 import { toast } from 'sonner';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { useStepRunner, type Step } from './_shared/stepRunner';
 import { safeShell } from './_shared/safeShell';
 import { StepRunnerDetails } from './_shared/StepRunnerDetails';
-import { pullFile } from '@/ipc/adb';
+import {
+  screenshotDiscardCache,
+  screenshotPullToCache,
+  screenshotSaveFromCache,
+} from '@/ipc/adb';
 
 /**
  * One-shot "capture a screenshot" tool.
  *
- * Pipeline (rendered as 3 steps so the user sees progress instead of
+ * Pipeline (rendered as 2 steps so the user sees progress instead of
  * a silent 4-second spinner):
  *   1. Run `screencap -p /sdcard/jadb-screenshot.png` on-device.
- *   2. Pop a save dialog so the user picks where to drop the file.
- *   3. Pull the file down via the existing `pull_file` IPC.
+ *   2. Pull the file down to the application cache.
  *
- * The image preview is a best-effort `file://` render; the actual
- * PNG only exists on disk after step 3, so the preview only lights
- * up once pull succeeds. We deliberately don't try to load the
- * device-side PNG through the IPC bridge because `read_file` would
- * buffer 5+ MB of PNG bytes per refresh; file:// is cheap and uses
- * the platform image viewer instead.
+ * The local copy is removed when the user either saves it to a final
+ * destination or discards the preview. The preview therefore does not
+ * need to pass the PNG bytes through the IPC bridge or the platform dialog.
  *
  * Idempotency: the device-side PNG is overwritten on every run.
- * The local copy is whatever the user picked in the save dialog
- * (default: `jadb-screenshot-<ts>.png`).
+ * The application cache copy is replaced on every successful pull.
  */
 export function ScreenshotCard({ serial }: { serial: string }) {
   const { t } = useTranslation();
-  const [lastLocal, setLastLocal] = useState<string | null>(null);
-  // `previewNonce` flips whenever a fresh screenshot lands on disk so
-  // the <img> re-loads even when the user picks the same path twice
-  // (browsers otherwise serve the cached file from the prior run).
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [previewPath, setPreviewPath] = useState<string>('');
+  // `previewNonce` busts the browser's cache when a fresh screenshot is
+  // pulled to the same application cache path.
   const [previewNonce, setPreviewNonce] = useState(0);
-
-  // Bridges the user's save-dialog pick (step 2) into step 3 without
-  // expanding the shared `useStepRunner` signature. Single-instance
-  // hook, so a useRef is enough -- no globals.
-  const localPathRef = useRef<string>('');
+  const [previewBusy, setPreviewBusy] = useState(false);
 
   const steps: Step[] = [
     {
@@ -71,40 +73,12 @@ export function ScreenshotCard({ serial }: { serial: string }) {
       },
     },
     {
-      id: 'pickTarget',
-      labelKey: 'pickTarget',
+      id: 'pullToCache',
+      labelKey: 'pullToCache',
       run: async (_s, log) => {
-        const local = await saveDialog({
-          title: t('tools.screenshot.saveTitle'),
-          defaultPath: `jadb-screenshot-${Date.now()}.png`,
-          filters: [{ name: 'PNG', extensions: ['png'] }],
-        });
-        if (!local) {
-          // User cancelled the save dialog. Skip step 3 (no path to
-          // pull to) and surface this as a soft failure so the card
-          // flips back to "ready" without a scary red badge.
-          return { ok: false, detail: t('tools.screenshot.saveCancelled') };
-        }
-        localPathRef.current = local;
-        log('[pickTarget] ' + local);
-        return { ok: true, detail: local };
-      },
-    },
-    {
-      id: 'pull',
-      labelKey: 'pull',
-      run: async (_s, log) => {
-        const localPath = localPathRef.current;
-        if (!localPath) {
-          throw new Error(t('tools.screenshot.missingLocalPath'));
-        }
-        const result = await pullFile(
-          serial,
-          '/sdcard/jadb-screenshot.png',
-          localPath,
-        );
-        log('[pull] ' + result);
-        setLastLocal(localPath);
+        const localPath = await screenshotPullToCache(serial);
+        log('[pullToCache] ' + localPath);
+        setPreviewPath(localPath);
         setPreviewNonce((n) => n + 1);
         return { ok: true, detail: localPath };
       },
@@ -114,18 +88,49 @@ export function ScreenshotCard({ serial }: { serial: string }) {
   const runner = useStepRunner(steps, serial);
 
   async function run() {
-    // Reset the bridge so a previous run's path can't leak in if the
-    // new run cancels at the dialog.
-    localPathRef.current = '';
     const intro = `[start] ${t('tools.screenshot.title')} @ ${serial}`;
     const ok = await runner.run(intro);
     if (ok) {
-      toast.success(t('tools.screenshot.success'));
-    } else if (localPathRef.current) {
-      // Step 3 actually failed -- genuine error toast.
+      setPreviewOpen(true);
+    } else {
       toast.error(t('tools.runFailed', { error: t('tools.screenshot.title') }));
     }
-    // else: user cancelled at the dialog; stay quiet.
+  }
+
+  async function savePreview() {
+    if (!previewPath) return;
+    setPreviewBusy(true);
+    try {
+      const localPath = await saveDialog({
+        title: t('tools.screenshot.saveTitle'),
+        defaultPath: `jadb-screenshot-${Date.now()}.png`,
+        filters: [{ name: 'PNG', extensions: ['png'] }],
+      });
+      if (!localPath) return;
+
+      const savedPath = await screenshotSaveFromCache(localPath);
+      setPreviewOpen(false);
+      setPreviewPath('');
+      toast.success(t('tools.screenshot.success', { path: savedPath }));
+    } catch (error) {
+      toast.error(t('tools.runFailed', { error: String(error) }));
+    } finally {
+      setPreviewBusy(false);
+    }
+  }
+
+  async function discardPreview() {
+    if (!previewPath) return;
+    setPreviewBusy(true);
+    try {
+      await screenshotDiscardCache();
+      setPreviewOpen(false);
+      setPreviewPath('');
+    } catch (error) {
+      toast.error(t('tools.runFailed', { error: String(error) }));
+    } finally {
+      setPreviewBusy(false);
+    }
   }
 
   const completedCount = runner.rows.filter((r) => r.status !== 'pending').length;
@@ -215,37 +220,6 @@ export function ScreenshotCard({ serial }: { serial: string }) {
           </div>
         </div>
 
-        {lastLocal && (
-          // Preview block sits between the header and the collapsible
-          // details panel so the user gets immediate visual feedback
-          // without having to expand the log. `file://` works on every
-          // platform Tauri targets today; the nonce (`?v=`) busts the
-          // browser's disk cache when the user overwrites the file.
-          <div className="mt-3 overflow-hidden rounded-md border border-border bg-bg-2">
-            <div className="flex items-center justify-between border-b border-border px-2 py-1 text-[11px] text-text-2">
-              <div className="inline-flex items-center gap-1">
-                <ImageIcon className="h-3 w-3" />
-                {t('tools.screenshot.preview')}
-              </div>
-              <Badge variant="secondary" className="h-4 px-1 py-0 text-[10px] leading-none">
-                {lastLocal.split(/[\\/]/).pop()}
-              </Badge>
-            </div>
-            <div className="grid max-h-56 place-items-center bg-black/40 p-2">
-              <img
-                src={`file://${lastLocal}?v=${previewNonce}`}
-                alt={t('tools.screenshot.preview')}
-                className="max-h-52 max-w-full rounded object-contain"
-                onError={(e) => {
-                  // Hide the broken image silently -- the card still
-                  // shows the file path badge so the user can find it.
-                  (e.currentTarget as HTMLImageElement).style.display = 'none';
-                }}
-              />
-            </div>
-          </div>
-        )}
-
         {runner.detailsOpen && runner.hasDetails && (
           <StepRunnerDetails
             rows={runner.rows}
@@ -256,6 +230,47 @@ export function ScreenshotCard({ serial }: { serial: string }) {
             logCopiedLabel={t('tools.miuiUsbInstall.logCopied')}
           />
         )}
+
+        <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
+          <DialogContent className="max-w-3xl">
+            <DialogHeader>
+              <DialogTitle>{t('tools.screenshot.previewTitle')}</DialogTitle>
+              <DialogDescription>
+                {t('tools.screenshot.previewDescription')}
+              </DialogDescription>
+            </DialogHeader>
+            {previewPath && (
+              <div className="grid max-h-[60vh] place-items-center overflow-hidden rounded-lg bg-black/40 p-2">
+                <img
+                  src={`${convertFileSrc(previewPath)}?v=${previewNonce}`}
+                  alt={t('tools.screenshot.preview')}
+                  className="max-h-[55vh] max-w-full rounded object-contain"
+                  onError={(e) => {
+                    (e.currentTarget as HTMLImageElement).style.display = 'none';
+                  }}
+                />
+              </div>
+            )}
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => void discardPreview()}
+                disabled={previewBusy}
+              >
+                {t('tools.screenshot.discard')}
+              </Button>
+              <Button
+                type="button"
+                onClick={() => void savePreview()}
+                disabled={previewBusy || !previewPath}
+              >
+                {previewBusy && <Loader2 className="h-4 w-4 animate-spin" />}
+                {t('tools.screenshot.save')}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </CardContent>
     </Card>
   );

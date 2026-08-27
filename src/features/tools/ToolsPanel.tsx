@@ -14,6 +14,7 @@ import { Badge } from '@/components/ui/badge';
 import { adbDevices, type AdbDevice } from '@/ipc/adb';
 import { useSettingsStore } from '@/store/settings';
 import { cn } from '@/lib/utils';
+import { Section } from './_shared/Section';
 import { MiuiUsbInstallCard } from './MiuiUsbInstallCard';
 import { ScreenshotCard } from './ScreenshotCard';
 import { WirelessTcpipCard } from './WirelessTcpipCard';
@@ -23,22 +24,26 @@ import { BugReportCard } from './BugReportCard';
 
 /**
  * Tools tab content. A "catch-all" for one-off helper actions that
- * don't deserve their own route -- each tool is a self-contained
- * card. The grid is intentionally `grid-cols-1 md:2 xl:3` so the
- * first 1-3 cards stay above the fold on a laptop while longer
- * lists remain scannable.
+ * don't deserve their own route. The page is split into three
+ * semantic sections so the user can scan to the right group
+ * instead of hunting through a flat grid of unrelated cards:
  *
- * We pull the device list the same way the Fastboot/Recovery panels
- * do (5 s poll) so a freshly-attached USB device shows up without a
- * manual reload. We deliberately don't reuse the ADB panel's
- * selection state -- tools tend to run against a specific device
- * and the user should be able to flip between serials without a
- * cross-tab reshuffle.
+ *   1. Connection       -- WirelessTcpipCard (full-width)
+ *   2. Device Actions   -- MiuiUsbInstall / Screenshot / BugReport /
+ *                          DevOptions (3-col grid)
+ *   3. App Management   -- FreezeAppsCard (full-width; needs the
+ *                          room for its package list)
  *
- * The `WirelessTcpipCard` needs a selected serial (the user picks
- * which device to open the TCP port on) but it sits above the
- * device-required grid because, semantically, it's the first step
- * of "stop using USB".
+ * `key={selected}` on every card forces a remount when the user
+ * flips the device dropdown, so per-card state (running rows,
+ * logs, ...) doesn't leak across unrelated device changes.
+ *
+ * We pull the device list the same way the Fastboot/Recovery
+ * panels do (5 s poll) so a freshly-attached USB device shows up
+ * without a manual reload. We deliberately don't reuse the ADB
+ * panel's selection state -- tools tend to run against a specific
+ * device and the user should be able to flip between serials
+ * without a cross-tab reshuffle.
  */
 export function ToolsPanel() {
   const { t } = useTranslation();
@@ -48,9 +53,6 @@ export function ToolsPanel() {
   // The selected serial. Defaults to the first online device; the
   // user can override via the dropdown.
   const [selected, setSelected] = useState<string>('');
-  // Bumped after a successful wireless pair so cards depending on
-  // a connected device (most of them) re-fetch their state from
-  // the freshly-added serial.
 
   const online = devices.filter((d) => d.state === 'device');
 
@@ -86,10 +88,6 @@ export function ToolsPanel() {
       return;
     }
     if (!selected || !online.some((d) => d.serial === selected)) {
-      // `online[0]` is reachable here because `online.length > 0`
-      // (the early-return above handled the empty case); spell the
-      // fact out so `noUncheckedIndexedAccess` doesn't barf on the
-      // `T | undefined` index type.
       const first = online[0];
       if (first) setSelected(first.serial);
     }
@@ -106,8 +104,13 @@ export function ToolsPanel() {
     );
   }
 
+  const noDevice = online.length === 0;
+
   return (
     <div className="space-y-4">
+      {/* Top header: tools-page title + online-device count +
+          device dropdown + manual refresh. Kept compact so the
+          sections below get the visible real estate. */}
       <Card>
         <CardContent className="flex flex-wrap items-center gap-3">
           <div className="flex items-center gap-2 text-sm font-semibold text-text-0">
@@ -131,14 +134,14 @@ export function ToolsPanel() {
               id="tools-device-select"
               value={selected}
               onChange={(e) => setSelected(e.target.value)}
-              disabled={online.length === 0}
+              disabled={noDevice}
               className={cn(
                 'h-8 rounded-md border border-border bg-bg-1 px-2 text-xs text-text-0',
                 'focus:outline-none focus:ring-2 focus:ring-accent',
                 'disabled:cursor-not-allowed disabled:opacity-50',
               )}
             >
-              {online.length === 0 ? (
+              {noDevice ? (
                 <option value="">{t('tools.noDeviceTitle')}</option>
               ) : (
                 online.map((d) => (
@@ -161,12 +164,21 @@ export function ToolsPanel() {
         </CardContent>
       </Card>
 
-      {/* Wireless tcpip sits above the device-required cards: it's
-          the "stop using USB" first step, so anchoring it visually
-          here mirrors the user's mental model. */}
-      <WirelessTcpipCard serial={selected} />
+      {/* Section 1: Connection. The wireless tcpip card lives here
+          because it's the "switch from USB to Wi-Fi" first step
+          and the rest of the tools assume a device is reachable.
+          Rendered even when no device is online so the user can
+          pair a fresh one without flipping tabs. */}
+      <Section
+        title={t('tools.section.connection.title')}
+        subtitle={t('tools.section.connection.subtitle')}
+      >
+        <WirelessTcpipCard serial={selected} />
+      </Section>
 
-      {online.length === 0 ? (
+      {/* Sections 2 + 3 only render when a device is online --
+          every card under them needs an adb-attached serial. */}
+      {noDevice ? (
         <Card className="border-warning">
           <CardContent className="flex items-start gap-3 text-sm">
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
@@ -177,17 +189,38 @@ export function ToolsPanel() {
           </CardContent>
         </Card>
       ) : (
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {/* `key={selected}` forces each card to remount when the
-              user flips devices -- otherwise per-card state (running
-              rows, logs, ...) would persist across an unrelated
-              device change. */}
-          <MiuiUsbInstallCard key={`miui:${selected}`} serial={selected} />
-          <ScreenshotCard key={`shot:${selected}`} serial={selected} />
-          <DevOptionsCard key={`devop:${selected}`} serial={selected} />
-          <FreezeAppsCard key={`freeze:${selected}`} serial={selected} />
-          <BugReportCard key={`bug:${selected}`} serial={selected} />
-        </div>
+        <>
+          {/* Section 2: Device Actions. Three single-action cards
+              in the first row (sized to `xl` so all three fit on a
+              laptop display without scrolling), then the wider
+              DevOptions card alone in the second row so it can
+              keep its 2-column switch grid without being
+              crammed. */}
+          <Section
+            title={t('tools.section.device.title')}
+            subtitle={t('tools.section.device.subtitle')}
+          >
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+              <MiuiUsbInstallCard key={`miui:${selected}`} serial={selected} />
+              <ScreenshotCard key={`shot:${selected}`} serial={selected} />
+              <BugReportCard key={`bug:${selected}`} serial={selected} />
+            </div>
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+              <DevOptionsCard key={`devop:${selected}`} serial={selected} />
+            </div>
+          </Section>
+
+          {/* Section 3: App Management. FreezeAppsCard gets full
+              width because its package list needs ~600 px to
+              render cleanly with the badge column + checkbox +
+              text without wrapping the package name awkwardly. */}
+          <Section
+            title={t('tools.section.app.title')}
+            subtitle={t('tools.section.app.subtitle')}
+          >
+            <FreezeAppsCard key={`freeze:${selected}`} serial={selected} />
+          </Section>
+        </>
       )}
     </div>
   );

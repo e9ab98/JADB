@@ -7,7 +7,7 @@ import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
-import { pickApkFile, pickOutDir, decompileApk } from '@/ipc/decompile';
+import { pickApkFile, pickOutDir, decompileApk, resolveUniqueOutDir } from '@/ipc/decompile';
 import type { TaskHandle } from '@/ipc/types';
 
 type Props = { onStarted: (h: TaskHandle) => void };
@@ -34,7 +34,27 @@ export function DecompileForm({ onStarted }: Props) {
   async function pickOut() {
     try {
       const d = await pickOutDir();
-      if (d) setOut(d);
+      if (!d) return;
+      // The system directory picker only returns existing paths, but
+      // apktool refuses any pre-existing output directory unless `-f`
+      // is passed. Treat the pick as a *parent* location and turn it
+      // into <parent>/<apk-basename> so the user always lands on a
+      // fresh path. When no APK has been picked yet we fall back to
+      // the picked path as-is (the user can re-pick after choosing the
+      // APK, or toggle "force" on the Start screen).
+      if (apk) {
+        try {
+          const derived = await resolveUniqueOutDir(d, apk);
+          if (derived !== d) {
+            toast.success(`输出目录已自动设置为 ${derived}`);
+          }
+          setOut(derived);
+          return;
+        } catch (e) {
+          toast.error(`解析输出目录失败，使用原始选择: ${String(e)}`);
+        }
+      }
+      setOut(d);
     } catch (e) {
       toast.error(String(e));
     }

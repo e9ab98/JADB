@@ -16,6 +16,15 @@ export async function pickOutDir(): Promise<string | null> {
   return typeof picked === 'string' ? picked : null;
 }
 
+/**
+ * Resolve a non-conflicting output directory inside the picked parent,
+ * named after the APK. Used to work around apktool refusing to write
+ * into any pre-existing directory unless `-f` is passed.
+ */
+export async function resolveUniqueOutDir(parent: string, baseName: string): Promise<string> {
+  return invoke<string>('resolve_unique_out_dir', { parent, baseName });
+}
+
 export async function decompileApk(path: string, outDir: string, force: boolean): Promise<TaskHandle> {
   return invoke<TaskHandle>('decompile_apk', { path, outDir, force });
 }

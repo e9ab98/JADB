@@ -955,19 +955,22 @@
     },
     "screenshot": {
       "title": "Screenshot",
-      "subtitle": "Run screencap on the device and save it locally with a quick preview.",
+      "subtitle": "Capture the device screen, preview it, then choose to save or discard it.",
       "run": "Capture",
       "running": "Capturing…",
       "success": "Screenshot saved",
       "saveTitle": "Save screenshot",
+      "save": "Save locally",
+      "discard": "Discard",
+      "previewTitle": "Screenshot preview",
+      "previewDescription": "Review the screenshot, then choose to save it locally or discard it.",
       "preview": "Preview",
       "captured": "Captured device screen",
       "saveCancelled": "Save cancelled",
       "missingLocalPath": "Missing local path",
       "steps": {
         "capture": "Run screencap on device",
-        "pickTarget": "Pick save location",
-        "pull": "Pull to local"
+        "pullToCache": "Pull to temporary cache"
       }
     },
     "devOptions": {
@@ -1069,6 +1072,20 @@
       "noIpFoundNoTcpip": "No IP found (tcpip was not executed). Check that WiFi is connected.",
       "tcpipFailedButIpKnown": "tcpip failed but an IP was found -- device may already be listening on the previous port. {{error}}",
       "partialWarning": "Partial success"
+    },
+    "section": {
+      "connection": {
+        "title": "Connection",
+        "subtitle": "Switch to / configure wireless ADB"
+      },
+      "device": {
+        "title": "Device actions",
+        "subtitle": "One-shot actions: MIUI USB install, screenshot, BugReport, developer options"
+      },
+      "app": {
+        "title": "App management",
+        "subtitle": "Bulk freeze / unfreeze apps on the device"
+      }
     }
   },
   "update": {
