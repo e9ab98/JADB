@@ -24,24 +24,24 @@ jobs:
           - os: macos-14
             target: aarch64-apple-darwin
             label: darwin-arm64
-            zealot_channel: "<jadb_mac_arm64_channel_key>"   # 替换成 Zealot 上对应 channel 的 32-char key
+            zealot_channel: "1d6ead200b6165f59fce3fd27d40bda9"   # jadb: darwin-aarch64
             bundler_args: "--bundles dmg,app"
           - os: macos-15-intel
             target: x86_64-apple-darwin
             label: darwin-x64
-            zealot_channel: "<jadb_mac_x64_channel_key>"   # 替换成 Zealot 上对应 channel 的 32-char key
+            zealot_channel: "d784abff2ff6d190e2ee98e39c1cc811"   # jadb: darwin-x64
             bundler_args: "--bundles dmg,app"
           - os: windows-2022
             target: x86_64-pc-windows-msvc
             label: windows-x64
-            zealot_channel: "<jadb_win_x64_channel_key>"   # 替换成 Zealot 上对应 channel 的 32-char key
+            zealot_channel: "2f365254252edba4abf70ed0e7d98fd1"   # jadb: windows-x86_64
             bundler_args: "--bundles msi"
           # Windows ARM64 (Surface Pro X, Snapdragon X laptops). GitHub
           # added windows-11-arm as a GA label in 2024.
           - os: windows-11-arm
             target: aarch64-pc-windows-msvc
             label: windows-arm64
-            zealot_channel: "<jadb_win_arm64_channel_key>"   # 替换成 Zealot 上对应 channel 的 32-char key
+            zealot_channel: "73863b9e0aec805d70e316d79c65d9ea"   # jadb: windows-aarch64
             bundler_args: "--bundles msi"
     runs-on: ${{ matrix.os }}
 
